@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Social Blocker v6</title>
+    <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net;"/>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-gradient-to-br from-gray-800 via-gray-900 to-gray-800 text-white font-sans select-none">
+
+    <!-- Deep Work Timer Bar -->
+    <div id="deep-work-banner" class="hidden bg-cyan-600 text-white text-center p-2 font-bold text-lg fixed top-0 left-0 right-0 z-50">
+        <span id="deep-work-timer"></span>
+    </div>
+
+    <div class="container mx-auto p-12 max-w-5xl min-h-screen pt-20">
+        <header class="text-center mb-12">
+            <h1 class="text-5xl font-bold text-cyan-400 mb-4">Social Blocker v6</h1>
+            <p class="text-gray-300 text-lg">Set your limits. Reclaim your time.</p>
+        </header>
+
+        <!-- Tab Navigation -->
+        <div class="mb-12">
+            <div class="border-b border-gray-600">
+                <nav class="-mb-px flex space-x-12" aria-label="Tabs">
+                    <button id="tab-dashboard" class="tab-btn">Dashboard</button>
+                    <button id="tab-history" class="tab-btn">History</button>
+                    <button id="tab-data" class="tab-btn">Data</button>
+                </nav>
+            </div>
+        </div>
+
+        <main>
+            <!-- Dashboard Content -->
+            <div id="content-dashboard" class="tab-content">
+                <!-- Master Status, Website Controls, etc. -->
+                <div class="bg-gray-800/80 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-700/50 p-8 mb-10 flex items-center justify-between">
+                     <div class="flex items-center">
+                         <svg class="w-8 h-8 text-cyan-400 mr-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+                        <span class="text-xl font-semibold">Master Blocker Status</span>
+                    </div>
+                     <div class="flex items-center">
+                        <span id="status-indicator" class="mr-4 text-sm font-semibold opacity-0 transition-opacity">(Saving...)</span>
+                        <span id="blocker-status-text" class="mr-4 text-lg font-bold"></span>
+                    </div>
+                </div>
+
+                <div class="bg-gray-800/80 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-700/50 p-8 mb-10">
+                    <h2 class="text-3xl font-semibold mb-6 border-b border-gray-600 pb-3">Website Controls</h2>
+                    <ul id="blocked-sites-list" class="space-y-6"></ul>
+                </div>
+
+                 <div class="bg-gray-800/80 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-700/50 p-8">
+                    <h2 class="text-3xl font-semibold mb-6">Focus Controls</h2>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div class="space-y-4">
+                             <label for="deep-work-duration" class="block text-sm font-medium text-gray-300">Deep Work Session (minutes)</label>
+                             <input type="number" id="deep-work-duration" min="1" max="480" value="25" step="1" class="bg-gray-700/80 border border-gray-600 text-white text-sm rounded-lg focus:ring-cyan-500 focus:border-cyan-500 block w-full p-3" placeholder="Enter minutes (1-480)" oninput="this.value = this.value.replace(/[^0-9]/g, '')">
+                             <button id="deep-work-btn" class="w-full bg-cyan-600 hover:bg-cyan-700 font-bold py-3 px-6 rounded-lg transition-colors shadow-lg">Start Deep Work</button>
+                        </div>
+                        <div class="space-y-4">
+                            <label class="block text-sm font-medium text-gray-300">Emergency Override</label>
+                            <button id="nuclear-option-btn" class="w-full bg-red-600 hover:bg-red-700 font-bold py-4 px-6 rounded-lg transition-colors shadow-lg">Nuclear Option</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- History Content -->
+            <div id="content-history" class="tab-content hidden">
+                <div class="bg-gray-800/80 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-700/50 p-8">
+                    <h2 class="text-3xl font-semibold mb-6">Blocker Activity (Last 7 Days)</h2>
+                    <canvas id="history-chart"></canvas>
+                </div>
+            </div>
+
+            <!-- Data Content -->
+            <div id="content-data" class="tab-content hidden">
+                <!-- Distraction Heat Map -->
+                <div class="bg-gray-800/80 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-700/50 p-8 mb-10">
+                    <h2 class="text-3xl font-semibold mb-6">Distraction Heat Map</h2>
+                    <p class="text-gray-300 mb-6 text-lg">Visual representation of when you're most likely to get distracted throughout the day</p>
+                    <div class="mb-6">
+                        <label for="heat-map-days" class="block text-sm font-medium text-gray-300 mb-3">Days to show:</label>
+                        <select id="heat-map-days" class="bg-gray-700/80 border border-gray-600 text-white text-sm rounded-lg focus:ring-cyan-500 focus:border-cyan-500 p-3">
+                            <option value="7">Last 7 Days</option>
+                            <option value="14">Last 14 Days</option>
+                            <option value="30">Last 30 Days</option>
+                        </select>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <div id="heat-map-container" class="min-w-full">
+                            <!-- Heat map will be generated here -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Limit Adherence Rate -->
+                <div class="bg-gray-800/80 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-700/50 p-8">
+                    <h2 class="text-3xl font-semibold mb-6">Limit Adherence Rate</h2>
+                    <p class="text-gray-300 mb-6 text-lg">Percentage showing how many sites stayed within their limits each day</p>
+                    <div class="mb-6">
+                        <label for="adherence-days" class="block text-sm font-medium text-gray-300 mb-3">Days to show:</label>
+                        <select id="adherence-days" class="bg-gray-700/80 border border-gray-600 text-white text-sm rounded-lg focus:ring-cyan-500 focus:border-cyan-500 p-3">
+                            <option value="7">Last 7 Days</option>
+                            <option value="14">Last 14 Days</option>
+                            <option value="30">Last 30 Days</option>
+                        </select>
+                    </div>
+                    <canvas id="adherence-chart"></canvas>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Commitment Modal -->
+    <div id="commitment-modal" class="fixed inset-0 bg-black bg-opacity-80 backdrop-blur-sm flex items-center justify-center hidden z-50">
+        <div class="bg-gray-800/95 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-700/50 p-10 max-w-lg w-full transform transition-all scale-95 opacity-0" id="modal-content">
+            <h2 class="text-3xl font-bold mb-6 text-yellow-400">Commitment Required</h2>
+            <p class="text-gray-300 mb-6 text-lg">To increase this time limit, you must demonstrate your commitment to focus. Please type the following paragraph exactly as it appears. The backspace key is disabled.</p>
+            <p id="commitment-paragraph" class="text-gray-400 italic bg-gray-900/80 p-6 rounded-lg mb-6 select-all border border-gray-700"></p>
+            <textarea id="commitment-input" rows="6" class="w-full bg-gray-900/80 text-white rounded-lg p-4 focus:outline-none focus:ring-2 focus:ring-cyan-500 border border-gray-700"></textarea>
+            <div class="flex justify-end space-x-6 mt-8">
+                <button id="cancel-commitment-btn" class="px-8 py-3 bg-gray-600 hover:bg-gray-700 rounded-lg transition-colors shadow-lg">Cancel</button>
+                <button id="confirm-commitment-btn" class="px-8 py-3 bg-green-600 hover:bg-green-700 rounded-lg transition-colors disabled:bg-gray-700 disabled:cursor-not-allowed shadow-lg" disabled>Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <style>
+        .tab-btn { @apply whitespace-nowrap py-5 px-2 border-b-2 font-medium text-xl transition-all duration-200; }
+        .tab-active { @apply border-cyan-400 text-cyan-300 font-semibold; }
+        .tab-inactive { @apply border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-400 hover:bg-gray-800/30 rounded-t-lg; }
+        .toggle-bg{background-color:#4A5568}.toggle-dot{background-color:white;transform:translateX(0);transition:transform .3s ease-in-out,background-color .3s ease-in-out}input:checked~.toggle-bg{background-color:#D32F2F}input:checked~.toggle-dot{transform:translateX(1.5rem);background-color:#F87171}input:not(:checked)~.toggle-bg{background-color:#22C55E}input:not(:checked)~.toggle-dot{background-color:#86EFAC}input:disabled~.toggle-bg{background-color:#374151;cursor:not-allowed}input:disabled~.toggle-dot{background-color:#6B7280}
+        #commitment-modal.hidden { display: none; }
+        #commitment-modal:not(.hidden) #modal-content { transform: scale(1); opacity: 1; }
+    </style>
+
+    <script src="renderer.js"></script>
+</body>
+</html>
+
