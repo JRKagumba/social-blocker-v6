@@ -20,6 +20,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // --- History and Logging ---
   getHistory: () => ipcRenderer.invoke('get-history'),
   logBlockerEvent: (isEnabled) => ipcRenderer.invoke('log-blocker-event', isEnabled),
+  logUnblockEvent: (siteName) => ipcRenderer.invoke('log-unblock-event', siteName),
+  getTodayUnblocks: () => ipcRenderer.invoke('get-today-unblocks'),
   
   // --- Analytics ---
   getHeatMapData: (days) => ipcRenderer.invoke('get-heat-map-data', days),

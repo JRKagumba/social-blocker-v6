@@ -55,9 +55,18 @@
                     <h2 class="text-3xl font-semibold mb-6">Focus Controls</h2>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div class="space-y-4">
-                             <label for="deep-work-duration" class="block text-sm font-medium text-gray-300">Deep Work Session (minutes)</label>
-                             <input type="number" id="deep-work-duration" min="1" max="480" value="25" step="1" class="bg-gray-700/80 border border-gray-600 text-white text-sm rounded-lg focus:ring-cyan-500 focus:border-cyan-500 block w-full p-3" placeholder="Enter minutes (1-480)" oninput="this.value = this.value.replace(/[^0-9]/g, '')">
-                             <button id="deep-work-btn" class="w-full bg-cyan-600 hover:bg-cyan-700 font-bold py-3 px-6 rounded-lg transition-colors shadow-lg">Start Deep Work</button>
+                             <label class="block text-sm font-medium text-gray-300 mb-3">Deep Work Session</label>
+                             <div class="grid grid-cols-2 gap-4 mb-4">
+                                 <div>
+                                     <input type="number" id="deep-work-hours" min="0" max="8" value="1" step="1" class="bg-gray-700/80 border border-gray-600 text-white text-sm rounded-lg focus:ring-cyan-500 focus:border-cyan-500 block w-full p-3 text-center" placeholder="0">
+                                     <span class="block text-xs text-gray-400 mt-1 text-center">hrs</span>
+                                 </div>
+                                 <div>
+                                     <input type="number" id="deep-work-minutes" min="0" max="59" value="0" step="1" class="bg-gray-700/80 border border-gray-600 text-white text-sm rounded-lg focus:ring-cyan-500 focus:border-cyan-500 block w-full p-3 text-center" placeholder="0">
+                                     <span class="block text-xs text-gray-400 mt-1 text-center">min</span>
+                                 </div>
+                             </div>
+                             <button id="deep-work-btn" class="w-full bg-cyan-600 hover:bg-cyan-700 font-bold py-3 px-6 rounded-lg transition-colors shadow-lg disabled:bg-gray-600 disabled:cursor-not-allowed">Start Deep Work</button>
                         </div>
                         <div class="space-y-4">
                             <label class="block text-sm font-medium text-gray-300">Emergency Override</label>
@@ -69,9 +78,34 @@
 
             <!-- History Content -->
             <div id="content-history" class="tab-content hidden">
-                <div class="bg-gray-800/80 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-700/50 p-8">
-                    <h2 class="text-3xl font-semibold mb-6">Blocker Activity (Last 7 Days)</h2>
+                <!-- Overall Blocker Activity -->
+                <div class="bg-gray-800/80 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-700/50 p-8 mb-10">
+                    <h2 class="text-3xl font-semibold mb-2">Blocker Activity (Last 7 Days)</h2>
+                    <p class="text-gray-400 mb-6">Shows the number of times you manually enabled the blocker each day.</p>
                     <canvas id="history-chart"></canvas>
+                </div>
+
+                <!-- Site-Specific Activity Table -->
+                <div class="bg-gray-800/80 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-700/50 p-8 mb-10">
+                    <h2 class="text-3xl font-semibold mb-2">Unblocked Sites Today</h2>
+                    <p class="text-gray-400 mb-6">Sites you've manually unblocked today - your distraction patterns revealed.</p>
+                    <div id="unblocks-table-container"></div>
+                </div>
+
+                <!-- Unblock Events Chart -->
+                <div class="bg-gray-800/80 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-700/50 p-8 mb-10">
+                    <h2 class="text-3xl font-semibold mb-2">Unblock Events by Site</h2>
+                    <p class="text-gray-400 mb-6">How many times you unblocked each site today.</p>
+                    <div id="unblocks-chart-container">
+                        <canvas id="unblocks-chart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Usage Chart -->
+                <div class="bg-gray-800/80 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-700/50 p-8">
+                    <h2 class="text-3xl font-semibold mb-2">Time Spent by Site</h2>
+                    <p class="text-gray-400 mb-6">Total time spent on each site today.</p>
+                    <canvas id="usage-chart"></canvas>
                 </div>
             </div>
 
@@ -96,8 +130,9 @@
                     </div>
                 </div>
 
-                <!-- Limit Adherence Rate -->
-                <div class="bg-gray-800/80 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-700/50 p-8">
+                <!-- --- CHANGE HERE: Removed the confusing Limit Adherence chart --- -->
+                <!-- Limit Adherence Rate (REMOVED) -->
+                <!-- <div class="bg-gray-800/80 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-700/50 p-8">
                     <h2 class="text-3xl font-semibold mb-6">Limit Adherence Rate</h2>
                     <p class="text-gray-300 mb-6 text-lg">Percentage showing how many sites stayed within their limits each day</p>
                     <div class="mb-6">
@@ -109,7 +144,7 @@
                         </select>
                     </div>
                     <canvas id="adherence-chart"></canvas>
-                </div>
+                </div> -->
             </div>
         </main>
     </div>

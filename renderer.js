@@ -5,7 +5,8 @@ const blockedSitesList = document.getElementById('blocked-sites-list');
 const statusIndicator = document.getElementById('status-indicator');
 const nuclearOptionBtn = document.getElementById('nuclear-option-btn');
 const deepWorkBtn = document.getElementById('deep-work-btn');
-const deepWorkDurationSelect = document.getElementById('deep-work-duration');
+const deepWorkHoursInput = document.getElementById('deep-work-hours');
+const deepWorkMinutesInput = document.getElementById('deep-work-minutes');
 const deepWorkBanner = document.getElementById('deep-work-banner');
 const deepWorkTimer = document.getElementById('deep-work-timer');
 const statusText = document.getElementById('blocker-status-text');
@@ -20,10 +21,8 @@ const contents = {
     data: document.getElementById('content-data') 
 };
 const chartCanvas = document.getElementById('history-chart');
-const adherenceChartCanvas = document.getElementById('adherence-chart');
 const heatMapContainer = document.getElementById('heat-map-container');
 const heatMapDaysSelect = document.getElementById('heat-map-days');
-const adherenceDaysSelect = document.getElementById('adherence-days');
 const commitmentModal = document.getElementById('commitment-modal');
 const modalContent = document.getElementById('modal-content');
 const commitmentParagraph = document.getElementById('commitment-paragraph');
@@ -34,7 +33,6 @@ const confirmCommitmentBtn = document.getElementById('confirm-commitment-btn');
 // --- State Variables ---
 let siteSettings = {};
 let historyChartInstance = null;
-let adherenceChartInstance = null;
 let commitmentState = { siteName: null, newLimit: 0, oldLimit: 0, inputElement: null };
 
 // --- Initialization ---
@@ -89,12 +87,21 @@ function renderSiteList(blockedDomains, usageData) {
 
 async function renderHistoryChart() {
     const historyData = await window.electronAPI.getHistory();
-    if (!historyData) return;
+    if (!historyData || !historyData.labels) return;
+    
+    // --- CHANGE HERE: Fix date parsing and formatting ---
+    const formattedLabels = historyData.labels.map(isoDate => {
+        // Create date correctly to avoid UTC conversion issues
+        const [year, month, day] = isoDate.split('-').map(Number);
+        const date = new Date(year, month - 1, day);
+        return date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+    });
+
     if (historyChartInstance) historyChartInstance.destroy();
     historyChartInstance = new Chart(chartCanvas.getContext('2d'), { 
         type: 'bar', 
         data: { 
-            labels: historyData.labels, 
+            labels: formattedLabels, // Use the new formatted labels
             datasets: [{ 
                 label: 'Times Blocker Enabled', 
                 data: historyData.data, 
@@ -121,8 +128,206 @@ async function renderHistoryChart() {
     });
 }
 
+// --- Site-Specific History Visualizations ---
+
+async function renderUnblocksTable() {
+    const unblockData = await window.electronAPI.getTodayUnblocks();
+    const usageData = await window.electronAPI.getInitialData();
+    const todayUsage = usageData.usageData;
+    
+    const tableContainer = document.getElementById('unblocks-table-container');
+    if (!tableContainer) return;
+    
+    // Filter to only show sites that were unblocked today
+    const unblockedSites = Object.entries(unblockData)
+        .filter(([siteName, count]) => count > 0)
+        .sort((a, b) => b[1] - a[1]); // Sort by unblock count descending
+    
+    if (unblockedSites.length === 0) {
+        tableContainer.innerHTML = '<p class="text-gray-400 text-center py-8">No sites unblocked today. Great focus! 🎯</p>';
+        return;
+    }
+    
+    let html = `
+        <div class="overflow-x-auto">
+            <table class="w-full text-left">
+                <thead class="border-b border-gray-600">
+                    <tr>
+                        <th class="py-3 px-4 text-cyan-400 font-semibold">Site Name</th>
+                        <th class="py-3 px-4 text-cyan-400 font-semibold text-right">Time Used Today</th>
+                        <th class="py-3 px-4 text-cyan-400 font-semibold text-right">Times Unblocked</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-700">
+    `;
+    
+    unblockedSites.forEach(([siteName, unblockCount]) => {
+        const usage = todayUsage[siteName] || 0;
+        const usageMinutes = (usage / 60).toFixed(1);
+        html += `
+            <tr class="hover:bg-gray-700/30 transition-colors">
+                <td class="py-3 px-4 font-medium">${siteName}</td>
+                <td class="py-3 px-4 text-right font-mono">${usageMinutes} min</td>
+                <td class="py-3 px-4 text-right font-mono text-yellow-400">${unblockCount}×</td>
+            </tr>
+        `;
+    });
+    
+    html += `
+                </tbody>
+            </table>
+        </div>
+    `;
+    
+    tableContainer.innerHTML = html;
+}
+
+async function renderUnblocksChart() {
+    const unblockData = await window.electronAPI.getTodayUnblocks();
+    const chartContainer = document.getElementById('unblocks-chart-container');
+    const canvas = document.getElementById('unblocks-chart');
+    
+    if (!canvas || !chartContainer) return;
+    
+    // Prepare data for all sites
+    const labels = Object.keys(unblockData);
+    const data = Object.values(unblockData);
+    
+    // Color bars based on count (green = 0, yellow = 1-2, red = 3+)
+    const backgroundColors = data.map(count => {
+        if (count === 0) return 'rgba(34, 197, 94, 0.6)'; // Green
+        if (count <= 2) return 'rgba(251, 191, 36, 0.6)'; // Yellow
+        return 'rgba(239, 68, 68, 0.6)'; // Red
+    });
+    
+    const borderColors = backgroundColors.map(color => color.replace('0.6', '1'));
+    
+    // Destroy existing chart if it exists
+    if (window.unblocksChartInstance) {
+        window.unblocksChartInstance.destroy();
+    }
+    
+    window.unblocksChartInstance = new Chart(canvas.getContext('2d'), {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Times Unblocked Today',
+                data: data,
+                backgroundColor: backgroundColors,
+                borderColor: borderColors,
+                borderWidth: 1,
+                borderRadius: 4
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: { 
+                        color: '#9CA3AF',
+                        stepSize: 1
+                    },
+                    grid: { color: '#4B5563' }
+                },
+                x: {
+                    ticks: { color: '#9CA3AF' },
+                    grid: { color: 'transparent' }
+                }
+            },
+            plugins: {
+                legend: { display: false },
+                title: {
+                    display: true,
+                    text: 'Unblock Events by Site (Today)',
+                    color: '#9CA3AF',
+                    font: { size: 14 }
+                }
+            }
+        }
+    });
+}
+
+async function renderUsageChart() {
+    const usageData = await window.electronAPI.getInitialData();
+    const todayUsage = usageData.usageData;
+    const canvas = document.getElementById('usage-chart');
+    
+    if (!canvas) return;
+    
+    // Prepare data for all sites (convert to minutes)
+    const labels = Object.keys(todayUsage);
+    const data = Object.values(todayUsage).map(seconds => (seconds / 60).toFixed(1));
+    
+    // Color bars based on site limits
+    const siteSettings = usageData.siteSettings;
+    const backgroundColors = labels.map(siteName => {
+        const site = siteSettings[siteName];
+        if (!site || site.limit === 0) return 'rgba(156, 163, 175, 0.6)'; // Gray for no limit
+        
+        const usage = todayUsage[siteName] / 60;
+        const limit = site.limit;
+        const percentage = (usage / limit) * 100;
+        
+        if (percentage < 50) return 'rgba(34, 197, 94, 0.6)'; // Green
+        if (percentage < 90) return 'rgba(251, 191, 36, 0.6)'; // Yellow
+        return 'rgba(239, 68, 68, 0.6)'; // Red
+    });
+    
+    const borderColors = backgroundColors.map(color => color.replace('0.6', '1'));
+    
+    // Destroy existing chart if it exists
+    if (window.usageChartInstance) {
+        window.usageChartInstance.destroy();
+    }
+    
+    window.usageChartInstance = new Chart(canvas.getContext('2d'), {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Usage (minutes)',
+                data: data,
+                backgroundColor: backgroundColors,
+                borderColor: borderColors,
+                borderWidth: 1,
+                borderRadius: 4
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: { 
+                        color: '#9CA3AF',
+                        callback: function(value) {
+                            return value + ' min';
+                        }
+                    },
+                    grid: { color: '#4B5563' }
+                },
+                x: {
+                    ticks: { color: '#9CA3AF' },
+                    grid: { color: 'transparent' }
+                }
+            },
+            plugins: {
+                legend: { display: false },
+                title: {
+                    display: true,
+                    text: 'Time Used by Site (Today)',
+                    color: '#9CA3AF',
+                    font: { size: 14 }
+                }
+            }
+        }
+    });
+}
+
 async function renderDataTab() {
-    await Promise.all([renderHeatMap(), renderAdherenceChart()]);
+    await renderHeatMap();
 }
 
 async function renderHeatMap() {
@@ -149,7 +354,9 @@ async function renderHeatMap() {
     
     // Data rows
     heatMapData.forEach(dayData => {
-        const date = new Date(dayData.date);
+        // --- CHANGE HERE: Fix date parsing for Heat Map to avoid UTC issues ---
+        const [year, month, day] = dayData.date.split('-').map(Number);
+        const date = new Date(year, month - 1, day);
         const dayName = date.toLocaleDateString(undefined, { weekday: 'short' });
         const monthDay = date.getDate();
         
@@ -192,93 +399,24 @@ async function renderHeatMap() {
     heatMapContainer.innerHTML = html;
 }
 
-async function renderAdherenceChart() {
-    const days = parseInt(adherenceDaysSelect.value);
-    const adherenceData = await window.electronAPI.getAdherenceData(days);
-    
-    if (!adherenceData || adherenceData.length === 0) {
-        if (adherenceChartInstance) adherenceChartInstance.destroy();
-        adherenceChartInstance = null;
-        return;
-    }
-    
-    if (adherenceChartInstance) adherenceChartInstance.destroy();
-    
-    const labels = adherenceData.map(d => {
-        const date = new Date(d.date);
-        return date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
-    });
-    
-    const data = adherenceData.map(d => d.adherenceRate);
-    const backgroundColors = data.map(rate => {
-        if (rate >= 90) return 'rgba(34, 197, 94, 0.8)'; // Green
-        if (rate >= 70) return 'rgba(251, 191, 36, 0.8)'; // Yellow
-        return 'rgba(239, 68, 68, 0.8)'; // Red
-    });
-    
-    adherenceChartInstance = new Chart(adherenceChartCanvas.getContext('2d'), {
-        type: 'bar',
-        data: {
-            labels: labels,
-            datasets: [{
-                label: 'Adherence Rate (%)',
-                data: data,
-                backgroundColor: backgroundColors,
-                borderColor: backgroundColors.map(color => color.replace('0.8', '1')),
-                borderWidth: 1,
-                borderRadius: 4
-            }]
-        },
-        options: {
-            responsive: true,
-            scales: {
-                y: {
-                    beginAtZero: true,
-                    max: 100,
-                    ticks: {
-                        color: '#9CA3AF',
-                        callback: function(value) {
-                            return value + '%';
-                        }
-                    },
-                    grid: {
-                        color: '#4B5563'
-                    }
-                },
-                x: {
-                    ticks: {
-                        color: '#9CA3AF'
-                    },
-                    grid: {
-                        color: 'transparent'
-                    }
-                }
-            },
-            plugins: {
-                legend: {
-                    display: false
-                },
-                tooltip: {
-                    callbacks: {
-                        afterLabel: function(context) {
-                            const index = context.dataIndex;
-                            const dayData = adherenceData[index];
-                            return [
-                                `Within limit: ${dayData.withinLimit}/${dayData.totalSites} sites`,
-                                `Perfect day: ${dayData.adherenceRate === 100 ? 'Yes' : 'No'}`
-                            ];
-                        }
-                    }
-                }
-            }
-        }
-    });
-}
+// --- Adherence chart removed (no longer needed) ---
 
 // --- Event Listeners Setup ---
 function setupEventListeners() {
-    blockedSitesList.addEventListener('change', (e) => { 
-        if (e.target.classList.contains('individual-toggle')) applyChanges(); 
+    blockedSitesList.addEventListener('change', async (e) => { 
+        if (e.target.classList.contains('individual-toggle')) {
+            // Detect if this is an unblock event (toggle is now unchecked and not disabled)
+            const toggle = e.target;
+            const siteName = toggle.dataset.siteName;
+            
+            if (!toggle.checked && !toggle.disabled) {
+                // This is a manual unblock
+                console.log(`Renderer: Manual unblock detected for ${siteName}`);
+                await window.electronAPI.logUnblockEvent(siteName);
+            }
+            
+            applyChanges();
+        }
     });
     blockedSitesList.addEventListener('focusout', (e) => { 
         if (e.target.classList.contains('limit-input')) handleLimitChange(e.target); 
@@ -291,26 +429,58 @@ function setupEventListeners() {
                 applyChanges(); 
             });
             deepWorkBtn.addEventListener('click', () => { 
-                const minutes = parseInt(deepWorkDurationSelect.value, 10);
-                if (isNaN(minutes) || minutes < 1 || minutes > 480) {
-                    alert('Please enter a valid number of minutes between 1 and 480.');
+                const hours = parseInt(deepWorkHoursInput.value, 10) || 0;
+                const minutes = parseInt(deepWorkMinutesInput.value, 10) || 0;
+                const totalMinutes = (hours * 60) + minutes;
+                
+                // Button should be disabled if invalid, but double-check
+                if (totalMinutes === 0 || totalMinutes > 480) {
                     return;
                 }
-                const seconds = minutes * 60;
-                window.electronAPI.startDeepWork(seconds); 
+                
+                const totalSeconds = totalMinutes * 60;
+                window.electronAPI.startDeepWork(totalSeconds); 
             });
             
-            // Make deep work input more user-friendly for typing
-            deepWorkDurationSelect.addEventListener('focus', () => {
-                deepWorkDurationSelect.select(); // Select all text when focused
+            // Validation function for Deep Work inputs
+            function validateDeepWorkInputs() {
+                const hours = parseInt(deepWorkHoursInput.value, 10) || 0;
+                const minutes = parseInt(deepWorkMinutesInput.value, 10) || 0;
+                const totalMinutes = (hours * 60) + minutes;
+                
+                // Disable button if total is 0 or exceeds 8 hours (480 minutes)
+                deepWorkBtn.disabled = (totalMinutes === 0 || totalMinutes > 480);
+            }
+            
+            // Live validation on input changes
+            deepWorkHoursInput.addEventListener('input', validateDeepWorkInputs);
+            deepWorkMinutesInput.addEventListener('input', validateDeepWorkInputs);
+            
+            // Select all text when focused (for easy editing)
+            deepWorkHoursInput.addEventListener('focus', () => {
+                deepWorkHoursInput.select();
             });
             
-            deepWorkDurationSelect.addEventListener('click', () => {
-                deepWorkDurationSelect.select(); // Select all text when clicked
+            deepWorkHoursInput.addEventListener('click', () => {
+                deepWorkHoursInput.select();
             });
+            
+            deepWorkMinutesInput.addEventListener('focus', () => {
+                deepWorkMinutesInput.select();
+            });
+            
+            deepWorkMinutesInput.addEventListener('click', () => {
+                deepWorkMinutesInput.select();
+            });
+            
+            // Run validation on page load
+            validateDeepWorkInputs();
     tabs.dashboard.addEventListener('click', () => showTab('dashboard'));
     tabs.history.addEventListener('click', async () => { 
-        await renderHistoryChart(); 
+        await renderHistoryChart();
+        await renderUnblocksTable();
+        await renderUnblocksChart();
+        await renderUsageChart();
         showTab('history'); 
     });
     tabs.data.addEventListener('click', async () => { 
@@ -318,7 +488,6 @@ function setupEventListeners() {
         showTab('data'); 
     });
     heatMapDaysSelect.addEventListener('change', () => renderHeatMap());
-    adherenceDaysSelect.addEventListener('change', () => renderAdherenceChart());
     cancelCommitmentBtn.addEventListener('click', closeCommitmentModal);
     confirmCommitmentBtn.addEventListener('click', confirmCommitment);
     commitmentInput.addEventListener('input', validateCommitmentInput);
@@ -394,33 +563,41 @@ async function handleLimitChange(input) {
 }
 
 async function applyChanges() {
-            statusIndicator.classList.remove('opacity-0');
-            statusIndicator.textContent = '(Requesting admin access...)';
-            
-            const sitesToBlock = [];
-            document.querySelectorAll('.individual-toggle:checked').forEach(toggle => {
-                sitesToBlock.push(...siteSettings[toggle.dataset.siteName].domains);
-            });
-            
-            try {
-                const result = await window.electronAPI.updateHostsFile(sitesToBlock);
-                if (result.success) {
-                    statusIndicator.textContent = '(Success!)';
-                    updateMasterStatusText();
-                } else {
-                    statusIndicator.textContent = '(Failed - check console)';
-                    console.error('Hosts file update failed:', result.error);
-                }
-            } catch (error) {
-                statusIndicator.textContent = '(Error occurred)';
-                console.error('Error updating hosts file:', error);
+    statusIndicator.classList.remove('opacity-0');
+    statusIndicator.textContent = '(Requesting admin access...)';
+    
+    const sitesToBlock = [];
+    document.querySelectorAll('.individual-toggle:checked').forEach(toggle => {
+        sitesToBlock.push(...siteSettings[toggle.dataset.siteName].domains);
+    });
+
+    // --- CHANGE HERE: Log blocker event when changes are applied ---
+    const isBlockingActive = sitesToBlock.length > 0;
+    await window.electronAPI.logBlockerEvent(isBlockingActive);
+    
+    try {
+        const result = await window.electronAPI.updateHostsFile(sitesToBlock);
+        if (result.success) {
+            statusIndicator.textContent = '(Success!)';
+            updateMasterStatusText();
+            // --- CHANGE HERE: Refresh history chart after a successful block/unblock ---
+            if (contents.history.classList.contains('hidden') === false) {
+                await renderHistoryChart();
             }
-            
-            setTimeout(() => {
-                statusIndicator.classList.add('opacity-0');
-                statusIndicator.textContent = '(Saving...)';
-            }, 2000);
+        } else {
+            statusIndicator.textContent = '(Failed - check console)';
+            console.error('Hosts file update failed:', result.error);
         }
+    } catch (error) {
+        statusIndicator.textContent = '(Error occurred)';
+        console.error('Error updating hosts file:', error);
+    }
+    
+    setTimeout(() => {
+        statusIndicator.classList.add('opacity-0');
+        statusIndicator.textContent = '(Saving...)';
+    }, 2000);
+}
 
 function updateMasterStatusText() {
     const total = Object.keys(siteSettings).length;

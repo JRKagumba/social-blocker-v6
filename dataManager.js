@@ -15,7 +15,7 @@ class DataManager {
                 'YouTube': { name: 'YouTube', domains: ['youtube.com', 'www.youtube.com'], keywords: ['youtube'], limit: 60 },
                 'Facebook': { name: 'Facebook', domains: ['facebook.com', 'www.facebook.com'], keywords: ['facebook'], limit: 60 },
                 'Instagram': { name: 'Instagram', domains: ['instagram.com', 'www.instagram.com'], keywords: ['instagram'], limit: 60 },
-                'Twitter/X': { name: 'Twitter/X', domains: ['twitter.com', 'www.twitter.com', 'x.com', 'www.x.com'], keywords: ['twitter', 'x'], limit: 60 },
+                'Twitter/X': { name: 'Twitter/X', domains: ['twitter.com', 'www.twitter.com', 'x.com', 'www.x.com'], keywords: ['twitter', 'x.com'], limit: 60 },
                 'Reddit': { name: 'Reddit', domains: ['reddit.com', 'www.reddit.com'], keywords: ['reddit'], limit: 60 },
                 'LinkedIn': { name: 'LinkedIn', domains: ['linkedin.com', 'www.linkedin.com'], keywords: ['linkedin'], limit: 60 },
             };
@@ -34,7 +34,8 @@ class DataManager {
                 'YouTube': ['youtube'],
                 'Facebook': ['facebook'],
                 'Instagram': ['instagram'],
-                'Twitter/X': ['twitter', 'x', 'x.com'], // Updated based on debug log: "X - Google Chrome", "Home / X - Google Chrome"
+                // --- CHANGE HERE: Made keywords more specific to avoid false positives ---
+                'Twitter/X': ['twitter', 'x.com'],
                 'Reddit': ['reddit'],
                 'LinkedIn': ['linkedin', 'linkedin.com']
             };
@@ -264,6 +265,7 @@ class DataManager {
     getHistoryData() {
         const history = this.getBlockerHistory();
         const last7Days = {};
+        // --- CHANGE HERE: Include the current day in the loop ---
         for (let i = 6; i >= 0; i--) {
             const d = new Date();
             d.setDate(d.getDate() - i);
@@ -277,9 +279,44 @@ class DataManager {
             }
         });
         return {
-            labels: Object.keys(last7Days).map(d => new Date(d).toLocaleDateString(undefined, { weekday: 'short' })),
+            labels: Object.keys(last7Days), // Pass raw ISO dates to renderer
             data: Object.values(last7Days)
         };
+    }
+
+    // Unblock History
+    getUnblockHistory() {
+        return this.store.get('unblockHistory', []);
+    }
+
+    addUnblockEvent(siteName) {
+        const history = this.getUnblockHistory();
+        history.push({ timestamp: new Date().toISOString(), siteName });
+        this.store.set('unblockHistory', history);
+        console.log(`DataManager: Logged unblock event for ${siteName}`);
+        return { success: true };
+    }
+
+    getTodayUnblocks() {
+        const today = new Date().toISOString().split('T')[0];
+        const history = this.getUnblockHistory();
+        const todayUnblocks = {};
+        
+        // Initialize all sites with 0
+        const allSiteSettings = this.getSiteSettings();
+        for (const siteName in allSiteSettings) {
+            todayUnblocks[siteName] = 0;
+        }
+        
+        // Count unblocks for today
+        history.forEach(event => {
+            const eventDate = event.timestamp.split('T')[0];
+            if (eventDate === today && todayUnblocks.hasOwnProperty(event.siteName)) {
+                todayUnblocks[event.siteName]++;
+            }
+        });
+        
+        return todayUnblocks;
     }
 
     // Heat Map Data

@@ -1,5 +1,20 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, Tray, Menu, Notification } = require('electron');
 const path = require('path');
+
+// --- Single Instance Lock ---
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+    app.quit();
+} else {
+    app.on('second-instance', () => {
+        // Someone tried to run a second instance, focus our window instead
+        if (mainWindow) {
+            if (mainWindow.isMinimized()) mainWindow.restore();
+            mainWindow.show();
+            mainWindow.focus();
+        }
+    });
+}
 
 // --- Import Modules ---
 const DataManager = require('./dataManager');
@@ -23,6 +38,10 @@ let dataManager;
 let hostsManager;
 let usageTracker;
 
+// --- Tray State ---
+let tray = null;
+let isQuitting = false;
+
 function createWindow() {
     mainWindow = new BrowserWindow({
         width: 800,
@@ -35,8 +54,77 @@ function createWindow() {
     });
     mainWindow.loadFile('index.html');
     
+    // Handle window close event (hide to tray instead of quitting)
+    mainWindow.on('close', (event) => {
+        if (!isQuitting) {
+            event.preventDefault();
+            mainWindow.hide();
+            console.log('Main: Window hidden to tray');
+        }
+    });
+    
     // Make mainWindow globally accessible for usage tracker
     global.mainWindow = mainWindow;
+}
+
+function createTray() {
+    // Create tray icon
+    tray = new Tray('icon.ico');
+    
+    // Set tooltip
+    tray.setToolTip('Social Blocker v6 - Running');
+    
+    // Build context menu
+    const contextMenu = Menu.buildFromTemplate([
+        {
+            label: 'Show Dashboard',
+            click: () => {
+                if (mainWindow) {
+                    if (mainWindow.isMinimized()) mainWindow.restore();
+                    mainWindow.show();
+                    mainWindow.focus();
+                }
+            }
+        },
+        { type: 'separator' },
+        {
+            label: 'Status: Active',
+            enabled: false
+        },
+        { type: 'separator' },
+        {
+            label: 'Quit',
+            click: () => {
+                isQuitting = true;
+                app.quit();
+            }
+        }
+    ]);
+    
+    // Set the context menu
+    tray.setContextMenu(contextMenu);
+    
+    // Handle tray click (left-click to show window)
+    tray.on('click', () => {
+        if (mainWindow) {
+            if (mainWindow.isMinimized()) mainWindow.restore();
+            mainWindow.show();
+            mainWindow.focus();
+        }
+    });
+    
+    console.log('Main: Tray initialized');
+    
+    // Show first-time notification
+    if (Notification.isSupported()) {
+        const notification = new Notification({
+            title: 'Social Blocker v6',
+            body: 'App is running in the background. Right-click the tray icon for options.',
+            icon: 'icon.ico'
+        });
+        notification.show();
+        console.log('Main: First-time notification shown');
+    }
 }
 
 app.whenReady().then(() => {
@@ -86,6 +174,9 @@ app.whenReady().then(() => {
     
     createWindow();
     
+    // Initialize Tray
+    createTray();
+    
     // Check if deep work was active when app was closed
     const deepWorkEndTime = dataManager.store.get('deepWork.endTime');
     if (deepWorkEndTime && new Date().getTime() < deepWorkEndTime) {
@@ -104,6 +195,14 @@ app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') {
         usageTracker.stop();
         app.quit();
+    }
+});
+
+// Clean up tray on app quit
+app.on('before-quit', () => {
+    if (tray) {
+        tray.destroy();
+        console.log('Main: Tray destroyed');
     }
 });
 
@@ -135,6 +234,14 @@ ipcMain.handle('get-history', async () => {
 
 ipcMain.handle('log-blocker-event', async (event, isEnabled) => {
     return dataManager.addBlockerEvent(isEnabled);
+});
+
+ipcMain.handle('log-unblock-event', async (event, siteName) => {
+    return dataManager.addUnblockEvent(siteName);
+});
+
+ipcMain.handle('get-today-unblocks', async () => {
+    return dataManager.getTodayUnblocks();
 });
 
 ipcMain.handle('get-heat-map-data', async (event, days = 7) => {
