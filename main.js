@@ -68,11 +68,12 @@ function createWindow() {
 }
 
 function createTray() {
-    // Create tray icon
-    tray = new Tray('icon.ico');
+    // Create tray icon (use absolute path for production builds)
+    const iconPath = path.join(__dirname, 'icon.ico');
+    tray = new Tray(iconPath);
     
     // Set tooltip
-    tray.setToolTip('Social Blocker v6 - Running');
+    tray.setToolTip('FocusGuard - Running');
     
     // Build context menu
     const contextMenu = Menu.buildFromTemplate([
@@ -117,10 +118,11 @@ function createTray() {
     
     // Show first-time notification
     if (Notification.isSupported()) {
+        const iconPath = path.join(__dirname, 'icon.ico');
         const notification = new Notification({
-            title: 'Social Blocker v6',
+            title: 'FocusGuard',
             body: 'App is running in the background. Right-click the tray icon for options.',
-            icon: 'icon.ico'
+            icon: iconPath
         });
         notification.show();
         console.log('Main: First-time notification shown');
@@ -128,6 +130,14 @@ function createTray() {
 }
 
 app.whenReady().then(() => {
+    // Register app to start on system login (minimized to tray)
+    app.setLoginItemSettings({
+        openAtLogin: true,
+        openAsHidden: true,
+        args: ['--hidden']
+    });
+    console.log('Main: Registered for startup on login');
+    
     // Initialize managers
     dataManager = new DataManager();
     hostsManager = new HostsManager();
@@ -172,7 +182,20 @@ app.whenReady().then(() => {
         usageTracker.start();
     }, 10000);
     
+    // Check if app was launched on startup
+    const launchedOnStartup = app.getLoginItemSettings().wasOpenedAtLogin || 
+                             process.argv.includes('--hidden');
+    
     createWindow();
+    
+    // If launched on startup, keep window hidden; otherwise show it
+    if (launchedOnStartup) {
+        console.log('Main: Launched on startup - starting minimized to tray');
+        mainWindow.hide();
+    } else {
+        console.log('Main: Launched manually - showing window');
+        mainWindow.show();
+    }
     
     // Initialize Tray
     createTray();
@@ -279,7 +302,7 @@ ipcMain.handle('resume-usage-tracker', async () => {
 
 ipcMain.handle('clear-usage-data', async () => {
     console.log('Clearing all usage data...');
-    const today = new Date().toISOString().split('T')[0];
+    const today = dataManager.getLocalISODate();
     dataManager.store.set(`usage.${today}`, {});
     console.log('Usage data cleared for today');
     return { success: true };

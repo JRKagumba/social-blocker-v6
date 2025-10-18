@@ -19,16 +19,21 @@
       "electron-store": "^8.2.0",
       "sudo-prompt": "^9.2.1"
     },
-    "build": {
-      "appId": "com.yourname.socialblockerv6",
-      "win": {
-        "target": "nsis"
-      },
-      "nsis": {
-        "oneClick": false,
-        "allowToChangeInstallationDirectory": true
-      }
+  "build": {
+    "appId": "com.yourname.socialblockerv6",
+    "files": [
+      "**/*",
+      "icon.ico"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
     }
+  }
   }
   
   

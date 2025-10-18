@@ -8,6 +8,14 @@ class DataManager {
         this.initializeDataStore();
     }
 
+    // Helper function to get the current local date in YYYY-MM-DD format
+    getLocalISODate(date = new Date()) {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    }
+
     initializeDataStore() {
         // Initialize site settings if they don't exist (for brand new users)
         if (!this.store.has('siteSettings')) {
@@ -63,7 +71,7 @@ class DataManager {
         this.cleanupCorruptedUsageData();
 
         // Initialize today's usage data
-        const today = new Date().toISOString().split('T')[0];
+        const today = this.getLocalISODate();
         if (!this.store.has(`usage.${today}`)) {
             this.store.set(`usage.${today}`, {});
         }
@@ -124,7 +132,7 @@ class DataManager {
         }
         
         // Initialize today's usage data
-        const today = new Date().toISOString().split('T')[0];
+        const today = this.getLocalISODate();
         this.store.set(`usage.${today}`, {});
         
         console.log('DataManager: All usage data has been cleared and reset');
@@ -168,7 +176,7 @@ class DataManager {
 
     // Usage Data
     getTodayUsage() {
-        const today = new Date().toISOString().split('T')[0];
+        const today = this.getLocalISODate();
         const usageData = this.store.get(`usage.${today}`, {});
         console.log(`🔍 DataManager.getTodayUsage():`);
         console.log(`   Date: ${today}`);
@@ -182,7 +190,7 @@ class DataManager {
     }
 
     setTodayUsage(usageData) {
-        const today = new Date().toISOString().split('T')[0];
+        const today = this.getLocalISODate();
         console.log(`💾 DataManager.setTodayUsage():`);
         console.log(`   Date: ${today}`);
         console.log(`   Setting data:`, JSON.stringify(usageData));
@@ -195,7 +203,7 @@ class DataManager {
     }
 
     updateSiteUsage(siteName, additionalSeconds) {
-        const today = new Date().toISOString().split('T')[0];
+        const today = this.getLocalISODate();
         console.log(`🔄 DataManager.updateSiteUsage():`);
         console.log(`   Site: ${siteName}`);
         console.log(`   Additional seconds: ${additionalSeconds} (type: ${typeof additionalSeconds})`);
@@ -269,7 +277,7 @@ class DataManager {
         for (let i = 6; i >= 0; i--) {
             const d = new Date();
             d.setDate(d.getDate() - i);
-            const day = d.toISOString().split('T')[0];
+            const day = this.getLocalISODate(d);
             last7Days[day] = 0;
         }
         history.forEach(event => {
@@ -298,7 +306,7 @@ class DataManager {
     }
 
     getTodayUnblocks() {
-        const today = new Date().toISOString().split('T')[0];
+        const today = this.getLocalISODate();
         const history = this.getUnblockHistory();
         const todayUnblocks = {};
         
@@ -327,7 +335,7 @@ class DataManager {
         for (let i = days - 1; i >= 0; i--) {
             const date = new Date(today);
             date.setDate(date.getDate() - i);
-            const dateStr = date.toISOString().split('T')[0];
+            const dateStr = this.getLocalISODate(date);
             
             const dayData = { date: dateStr, hours: [] };
             
@@ -359,7 +367,7 @@ class DataManager {
         for (let i = days - 1; i >= 0; i--) {
             const date = new Date(today);
             date.setDate(date.getDate() - i);
-            const dateStr = date.toISOString().split('T')[0];
+            const dateStr = this.getLocalISODate(date);
             
             let totalSites = 0;
             let withinLimit = 0;
@@ -391,7 +399,6 @@ class DataManager {
 
     // Initial Data for Renderer
     getInitialData() {
-        const today = new Date().toISOString().split('T')[0];
         return {
             success: true,
             siteSettings: this.getSiteSettings(),
