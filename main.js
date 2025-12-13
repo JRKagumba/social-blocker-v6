@@ -68,8 +68,19 @@ function createWindow() {
 }
 
 function createTray() {
-    // Create tray icon (use absolute path for production builds)
-    const iconPath = path.join(__dirname, 'icon.ico');
+    // Create tray icon with proper path resolution for both dev and production
+    const iconPath = app.isPackaged 
+        ? path.join(process.resourcesPath, 'icon.ico')
+        : path.join(__dirname, 'icon.ico');
+    
+    console.log('=== TRAY DIAGNOSTIC ===');
+    console.log('App is packaged:', app.isPackaged);
+    console.log('Icon path:', iconPath);
+    console.log('Icon exists:', require('fs').existsSync(iconPath));
+    console.log('__dirname:', __dirname);
+    console.log('process.resourcesPath:', process.resourcesPath);
+    console.log('=======================');
+    
     tray = new Tray(iconPath);
     
     // Set tooltip
@@ -114,11 +125,11 @@ function createTray() {
         }
     });
     
-    console.log('Main: Tray initialized');
+    console.log('Main: Tray created successfully');
+    console.log('Main: Tray is destroyed?', tray.isDestroyed());
     
     // Show first-time notification
     if (Notification.isSupported()) {
-        const iconPath = path.join(__dirname, 'icon.ico');
         const notification = new Notification({
             title: 'FocusGuard',
             body: 'App is running in the background. Right-click the tray icon for options.',
@@ -126,17 +137,27 @@ function createTray() {
         });
         notification.show();
         console.log('Main: First-time notification shown');
+    } else {
+        console.log('Main: Notifications not supported');
     }
 }
 
 app.whenReady().then(() => {
     // Register app to start on system login (minimized to tray)
-    app.setLoginItemSettings({
-        openAtLogin: true,
-        openAsHidden: true,
-        args: ['--hidden']
-    });
-    console.log('Main: Registered for startup on login');
+    // IMPORTANT: Only do this in packaged builds. In dev (npm start), this can register
+    // the Electron binary itself, which causes the "Electron" splash screen at startup.
+    if (app.isPackaged) {
+        app.setLoginItemSettings({
+            openAtLogin: true,
+            openAsHidden: true,
+            args: ['--hidden']
+        });
+        console.log('Main: Registered for startup on login (packaged)');
+    } else {
+        // Actively disable any previous dev-mode startup registration
+        app.setLoginItemSettings({ openAtLogin: false });
+        console.log('Main: Dev mode - startup disabled');
+    }
     
     // Initialize managers
     dataManager = new DataManager();
@@ -232,6 +253,14 @@ app.on('before-quit', () => {
 // --- IPC Handlers ---
 ipcMain.handle('get-initial-data', async () => {
     return dataManager.getInitialData();
+});
+
+ipcMain.handle('lock-site-for-today', (event, siteName) => {
+    return dataManager.lockSiteForToday(siteName);
+});
+
+ipcMain.handle('get-manual-locks', () => {
+    return dataManager.getManualLocks();
 });
 
 ipcMain.handle('get-commitment-paragraph', () => {

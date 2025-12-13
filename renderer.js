@@ -10,6 +10,15 @@ const deepWorkMinutesInput = document.getElementById('deep-work-minutes');
 const deepWorkBanner = document.getElementById('deep-work-banner');
 const deepWorkTimer = document.getElementById('deep-work-timer');
 const statusText = document.getElementById('blocker-status-text');
+const pendingChangesBanner = document.getElementById('pending-changes-banner');
+const pendingChangesText = document.getElementById('pending-changes-text');
+const applyChangesBtn = document.getElementById('apply-changes-btn');
+const revertChangesBtn = document.getElementById('revert-changes-btn');
+const pendingChangesPreview = document.getElementById('pending-changes-preview');
+const willBlockList = document.getElementById('will-block-list');
+const willUnblockList = document.getElementById('will-unblock-list');
+const willBlockSites = document.getElementById('will-block-sites');
+const willUnblockSites = document.getElementById('will-unblock-sites');
 const tabs = { 
     dashboard: document.getElementById('tab-dashboard'), 
     history: document.getElementById('tab-history'), 
@@ -35,12 +44,17 @@ let siteSettings = {};
 let historyChartInstance = null;
 let commitmentState = { siteName: null, newLimit: 0, oldLimit: 0, inputElement: null };
 
+// --- Pending Changes State ---
+let savedToggleStates = {}; // The state saved to disk (current reality)
+let pendingToggleStates = {}; // The state shown in UI (pending changes)
+let hasPendingChanges = false;
+
 // --- Initialization ---
 window.addEventListener('DOMContentLoaded', async () => {
     const initialData = await window.electronAPI.getInitialData();
     if (initialData.success) {
         siteSettings = initialData.siteSettings;
-        renderSiteList(initialData.blockedDomains, initialData.usageData);
+        renderSiteList(initialData.blockedDomains, initialData.usageData, initialData.manualLocks, initialData.today);
         updateMasterStatusText();
         updateDeepWorkUI(initialData.deepWork);
         await renderHistoryChart();
@@ -54,16 +68,33 @@ window.electronAPI.onUsageUpdate(handleUsageUpdate);
 window.electronAPI.onDeepWorkUpdate(updateDeepWorkUI);
 
 // --- UI Rendering & State Updates ---
-function renderSiteList(blockedDomains, usageData) {
+function renderSiteList(blockedDomains, usageData, manualLocks = {}, today = null) {
     blockedSitesList.innerHTML = '';
+    
+    // Initialize saved states
+    savedToggleStates = {};
+    pendingToggleStates = {};
+
+    const todayStr = today || getLocalISODate();
+    
     Object.values(siteSettings).forEach(site => {
+        const isLockedToday = manualLocks && manualLocks[site.name] === todayStr;
         const li = document.createElement('li');
         li.className = 'p-6 bg-gray-700/60 backdrop-blur-sm rounded-xl border border-gray-600/50 flex items-center justify-between shadow-lg hover:shadow-xl transition-all duration-200';
+        if (isLockedToday) li.classList.add('opacity-60');
         const isManuallyBlocked = site.domains.some(domain => blockedDomains.includes(domain));
         const usageToday = usageData[site.name] || 0;
         const usageInMinutes = (parseFloat(usageToday) / 60).toFixed(1);
         const isLimitReached = site.limit > 0 && usageInMinutes >= site.limit;
-        const isBlocked = isManuallyBlocked || isLimitReached;
+        const isBlocked = isManuallyBlocked || isLimitReached || isLockedToday;
+        
+        const lockControlHtml = isLockedToday
+            ? `<div class="mt-2 text-xs font-semibold text-amber-300">Locked today</div>`
+            : (isLimitReached ? '' : `<button class="lock-today-btn mt-2 text-xs px-2 py-1 rounded bg-gray-800/40 border border-gray-600 hover:bg-gray-800/70 text-gray-200" data-site-name="${site.name}">Lock today</button>`);
+
+        // Store the saved state (what's actually on disk)
+        savedToggleStates[site.name] = isBlocked;
+        pendingToggleStates[site.name] = isBlocked;
 
         li.innerHTML = `
             <div class="flex flex-col">
@@ -74,15 +105,20 @@ function renderSiteList(blockedDomains, usageData) {
                     <input type="number" value="${site.limit}" min="0" class="limit-input bg-gray-800 text-white w-12 text-center rounded focus:outline-none focus:ring-2 focus:ring-cyan-500" data-site-name="${site.name}" data-old-value="${site.limit}">
                     <span class="ml-1">mins</span>
                 </div>
+                ${lockControlHtml}
             </div>
             <label class="relative inline-flex items-center cursor-pointer">
-                <input type="checkbox" id="toggle-${site.name}" class="sr-only peer individual-toggle" data-site-name="${site.name}" ${isBlocked ? 'checked' : ''} ${isLimitReached ? 'disabled' : ''}>
+                <input type="checkbox" id="toggle-${site.name}" class="sr-only peer individual-toggle" data-site-name="${site.name}" ${isBlocked ? 'checked' : ''} ${(isLimitReached || isLockedToday) ? 'disabled' : ''}>
                 <div class="w-14 h-8 toggle-bg rounded-full"></div>
                 <div class="toggle-dot absolute top-1 left-1 h-6 w-6 rounded-full transition-transform"></div>
             </label>
         `;
         blockedSitesList.appendChild(li);
     });
+    
+    // Reset pending changes on initial render
+    hasPendingChanges = false;
+    updatePendingChangesBanner();
 }
 
 async function renderHistoryChart() {
@@ -401,33 +437,140 @@ async function renderHeatMap() {
 
 // --- Adherence chart removed (no longer needed) ---
 
+// --- Pending Changes Management ---
+function updatePendingChangesBanner() {
+    // Check if there are any differences between saved and pending states
+    hasPendingChanges = false;
+    const willBlock = [];
+    const willUnblock = [];
+    
+    Object.keys(pendingToggleStates).forEach(siteName => {
+        if (savedToggleStates[siteName] !== pendingToggleStates[siteName]) {
+            hasPendingChanges = true;
+            if (pendingToggleStates[siteName]) {
+                willBlock.push(siteName);
+            } else {
+                willUnblock.push(siteName);
+            }
+        }
+    });
+    
+    // Show/hide the banner
+    if (hasPendingChanges) {
+        pendingChangesBanner.classList.remove('hidden');
+        pendingChangesPreview.classList.remove('hidden');
+        
+        // Update the count
+        const changeCount = willBlock.length + willUnblock.length;
+        pendingChangesText.textContent = `You have ${changeCount} unsaved change${changeCount > 1 ? 's' : ''}`;
+        
+        // Show what will change
+        if (willBlock.length > 0) {
+            willBlockList.classList.remove('hidden');
+            willBlockSites.textContent = willBlock.join(', ');
+        } else {
+            willBlockList.classList.add('hidden');
+        }
+        
+        if (willUnblock.length > 0) {
+            willUnblockList.classList.remove('hidden');
+            willUnblockSites.textContent = willUnblock.join(', ');
+        } else {
+            willUnblockList.classList.add('hidden');
+        }
+    } else {
+        pendingChangesBanner.classList.add('hidden');
+        pendingChangesPreview.classList.add('hidden');
+    }
+}
+
+function handleToggleChange(siteName) {
+    const toggle = document.getElementById(`toggle-${siteName}`);
+    if (!toggle) return;
+    
+    // Update pending state
+    pendingToggleStates[siteName] = toggle.checked;
+    
+    // Detect if this is an unblock event for logging (only when applying, not pending)
+    // We'll handle logging when changes are actually applied
+    
+    // Update the banner
+    updatePendingChangesBanner();
+}
+
+function revertPendingChanges() {
+    // Reset all toggles to their saved state
+    Object.keys(savedToggleStates).forEach(siteName => {
+        const toggle = document.getElementById(`toggle-${siteName}`);
+        if (toggle && !toggle.disabled) {
+            toggle.checked = savedToggleStates[siteName];
+            pendingToggleStates[siteName] = savedToggleStates[siteName];
+        }
+    });
+    
+    updatePendingChangesBanner();
+}
+
 // --- Event Listeners Setup ---
 function setupEventListeners() {
     blockedSitesList.addEventListener('change', async (e) => { 
         if (e.target.classList.contains('individual-toggle')) {
-            // Detect if this is an unblock event (toggle is now unchecked and not disabled)
-            const toggle = e.target;
-            const siteName = toggle.dataset.siteName;
-            
-            if (!toggle.checked && !toggle.disabled) {
-                // This is a manual unblock
-                console.log(`Renderer: Manual unblock detected for ${siteName}`);
-                await window.electronAPI.logUnblockEvent(siteName);
-            }
-            
-            applyChanges();
+            const siteName = e.target.dataset.siteName;
+            handleToggleChange(siteName);
         }
     });
+    blockedSitesList.addEventListener('click', async (e) => {
+        const lockBtn = e.target.closest('.lock-today-btn');
+        if (!lockBtn) return;
+        const siteName = lockBtn.dataset.siteName;
+        await lockSiteForToday(siteName);
+    });
+
     blockedSitesList.addEventListener('focusout', (e) => { 
         if (e.target.classList.contains('limit-input')) handleLimitChange(e.target); 
     });
-            nuclearOptionBtn.addEventListener('click', () => { 
-                document.querySelectorAll('.individual-toggle').forEach(t => { 
-                    t.checked = true; 
-                    t.disabled = true; 
-                }); 
-                applyChanges(); 
-            });
+    
+    // Apply changes button - this triggers the actual hosts file update
+    applyChangesBtn.addEventListener('click', async () => {
+        // Log unblock events for sites that are being unblocked
+        for (const siteName in pendingToggleStates) {
+            const wasSaved = savedToggleStates[siteName];
+            const isPending = pendingToggleStates[siteName];
+            
+            // If it was blocked and is now being unblocked
+            if (wasSaved && !isPending) {
+                console.log(`Renderer: Manual unblock detected for ${siteName}`);
+                await window.electronAPI.logUnblockEvent(siteName);
+            }
+        }
+        
+        await applyChanges();
+    });
+    
+    // Revert changes button
+    revertChangesBtn.addEventListener('click', () => {
+        revertPendingChanges();
+    });
+    
+    // Keyboard shortcut: Ctrl+S to apply changes
+    document.addEventListener('keydown', (e) => {
+        if (e.ctrlKey && e.key === 's') {
+            e.preventDefault();
+            if (hasPendingChanges) {
+                applyChangesBtn.click();
+            }
+        }
+    });
+    
+    nuclearOptionBtn.addEventListener('click', () => { 
+        document.querySelectorAll('.individual-toggle').forEach(t => {
+            if (!t.disabled) {
+                t.checked = true;
+                pendingToggleStates[t.dataset.siteName] = true;
+            }
+        });
+        updatePendingChangesBanner();
+    });
             deepWorkBtn.addEventListener('click', () => { 
                 const hours = parseInt(deepWorkHoursInput.value, 10) || 0;
                 const minutes = parseInt(deepWorkMinutesInput.value, 10) || 0;
@@ -525,7 +668,13 @@ function handleUsageUpdate(usageData) {
             if (toggle && !toggle.disabled) { 
                 console.log(`Renderer: Setting toggle for ${siteName} to checked and disabled`);
                 toggle.checked = true; 
-                toggle.disabled = true; 
+                toggle.disabled = true;
+                
+                // Update both pending and saved states for auto-block
+                pendingToggleStates[siteName] = true;
+                savedToggleStates[siteName] = true;
+                
+                // Auto-blocks should apply immediately
                 applyChanges(); 
             } else {
                 console.log(`Renderer: Toggle for ${siteName} not found or already disabled`);
@@ -571,7 +720,7 @@ async function applyChanges() {
         sitesToBlock.push(...siteSettings[toggle.dataset.siteName].domains);
     });
 
-    // --- CHANGE HERE: Log blocker event when changes are applied ---
+    // --- Log blocker event when changes are applied ---
     const isBlockingActive = sitesToBlock.length > 0;
     await window.electronAPI.logBlockerEvent(isBlockingActive);
     
@@ -579,8 +728,18 @@ async function applyChanges() {
         const result = await window.electronAPI.updateHostsFile(sitesToBlock);
         if (result.success) {
             statusIndicator.textContent = '(Success!)';
+            
+            // Update saved states to match what was just applied
+            Object.keys(pendingToggleStates).forEach(siteName => {
+                savedToggleStates[siteName] = pendingToggleStates[siteName];
+            });
+            
+            // Hide the pending changes banner
+            hasPendingChanges = false;
+            updatePendingChangesBanner();
             updateMasterStatusText();
-            // --- CHANGE HERE: Refresh history chart after a successful block/unblock ---
+            
+            // Refresh history chart after a successful block/unblock
             if (contents.history.classList.contains('hidden') === false) {
                 await renderHistoryChart();
             }
@@ -628,6 +787,43 @@ function updateDeepWorkUI(deepWork) {
         deepWorkBanner.classList.add('hidden');
         deepWorkBtn.disabled = false;
         deepWorkBtn.textContent = 'Start Deep Work';
+    }
+}
+
+async function lockSiteForToday(siteName) {
+    try {
+        const toggle = blockedSitesList.querySelector(`.individual-toggle[data-site-name="${CSS.escape(siteName)}"]`);
+        if (!toggle) return;
+
+        const prevChecked = toggle.checked;
+        const prevPending = pendingToggleStates[siteName];
+        const prevSaved = savedToggleStates[siteName];
+
+        // Ensure it's selected for blocking
+        toggle.checked = true;
+        pendingToggleStates[siteName] = true;
+        hasPendingChanges = true;
+        updatePendingChangesBanner();
+
+        const applied = await applyChanges();
+        if (!applied) {
+            // Revert UI state if apply failed/cancelled
+            toggle.checked = prevChecked;
+            pendingToggleStates[siteName] = prevPending ?? prevSaved ?? prevChecked;
+            updatePendingChangesBanner();
+            return;
+        }
+
+        await window.electronAPI.lockSiteForToday(siteName);
+
+        const latest = await window.electronAPI.getInitialData();
+        if (latest.success) {
+            siteSettings = latest.siteSettings;
+            renderSiteList(latest.blockedDomains, latest.usageData, latest.manualLocks, latest.today);
+            updateMasterStatusText();
+        }
+    } catch (err) {
+        console.error('Error locking site for today:', err);
     }
 }
 

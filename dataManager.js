@@ -8,6 +8,100 @@ class DataManager {
         this.initializeDataStore();
     }
 
+    // Centralized defaults so v6 can safely evolve without breaking existing users.
+    // NOTE: matchPatterns are stored as **strings** (compiled to RegExp at runtime).
+    getDefaultSiteSettings() {
+        return {
+            'YouTube': {
+                name: 'YouTube',
+                domains: ['youtube.com', 'www.youtube.com', 'm.youtube.com'],
+                keywords: ['youtube', 'youtube.com'],
+                matchPatterns: [
+                    // Examples seen in window titles: "YouTube", "youtube.com", "YouTube - Google Chrome"
+                    '\\byoutube\\b',
+                    '\\byoutube\\.com\\b'
+                ],
+                limit: 60
+            },
+            'Facebook': {
+                name: 'Facebook',
+                domains: ['facebook.com', 'www.facebook.com', 'm.facebook.com'],
+                keywords: ['facebook', 'facebook.com'],
+                matchPatterns: ['\\bfacebook\\b', '\\bfacebook\\.com\\b'],
+                limit: 60
+            },
+            'Instagram': {
+                name: 'Instagram',
+                domains: ['instagram.com', 'www.instagram.com'],
+                keywords: ['instagram', 'instagram.com'],
+                matchPatterns: ['\\binstagram\\b', '\\binstagram\\.com\\b'],
+                limit: 60
+            },
+            'Twitter/X': {
+                name: 'Twitter/X',
+                domains: [
+                    'twitter.com',
+                    'www.twitter.com',
+                    'mobile.twitter.com',
+                    'x.com',
+                    'www.x.com'
+                ],
+                // IMPORTANT: Do NOT include a bare "x" keyword. It will match almost anything.
+                keywords: ['twitter', 'twitter.com', 'x.com'],
+                matchPatterns: [
+                    // Old brand
+                    '\\btwitter\\b',
+                    '\\btwitter\\.com\\b',
+                    // Domain
+                    '\\bx\\.com\\b',
+                    // New site titles often look like: "Notifications / X" or "Home / X"
+                    '\\s/\\sx\\s',
+                    '\\s-\\sx\\s'
+                ],
+                limit: 60
+            },
+            'Reddit': {
+                name: 'Reddit',
+                // Subdomains matter for hosts-file blocking.
+                domains: ['reddit.com', 'www.reddit.com', 'old.reddit.com', 'new.reddit.com', 'np.reddit.com', 'redd.it'],
+                keywords: ['reddit', 'reddit.com', 'redd.it'],
+                matchPatterns: ['\\breddit\\b', '\\breddit\\.com\\b', '\\bredd\\.it\\b'],
+                limit: 60
+            },
+            'LinkedIn': {
+                name: 'LinkedIn',
+                domains: ['linkedin.com', 'www.linkedin.com'],
+                keywords: ['linkedin', 'linkedin.com'],
+                matchPatterns: ['\\blinkedin\\b', '\\blinkedin\\.com\\b'],
+                limit: 60
+            },
+            'Messenger': {
+                name: 'Messenger',
+                domains: ['messenger.com', 'www.messenger.com'],
+                keywords: ['messenger', 'messenger.com'],
+                matchPatterns: ['\\bmessenger\\b', '\\bmessenger\\.com\\b'],
+                limit: 60
+            }
+        };
+    }
+
+    sanitizeKeywords(siteName, keywords) {
+        if (!Array.isArray(keywords)) return [];
+
+        const cleaned = keywords
+            .map(k => (typeof k === 'string' ? k.trim().toLowerCase() : ''))
+            .filter(Boolean)
+            // Global safety: remove 1–2 char tokens unless it's clearly a domain-like token.
+            .filter(k => k.length > 2 || k.includes('.'));
+
+        // Extra safety for the one special case that caused huge false positives.
+        if (siteName === 'Twitter/X') {
+            return cleaned.filter(k => k !== 'x');
+        }
+
+        return cleaned;
+    }
+
     // Helper function to get the current local date in YYYY-MM-DD format
     getLocalISODate(date = new Date()) {
         const year = date.getFullYear();
@@ -19,43 +113,97 @@ class DataManager {
     initializeDataStore() {
         // Initialize site settings if they don't exist (for brand new users)
         if (!this.store.has('siteSettings')) {
-            const siteSettings = {
-                'YouTube': { name: 'YouTube', domains: ['youtube.com', 'www.youtube.com'], keywords: ['youtube'], limit: 60 },
-                'Facebook': { name: 'Facebook', domains: ['facebook.com', 'www.facebook.com'], keywords: ['facebook'], limit: 60 },
-                'Instagram': { name: 'Instagram', domains: ['instagram.com', 'www.instagram.com'], keywords: ['instagram'], limit: 60 },
-                'Twitter/X': { name: 'Twitter/X', domains: ['twitter.com', 'www.twitter.com', 'x.com', 'www.x.com'], keywords: ['twitter', 'x.com'], limit: 60 },
-                'Reddit': { name: 'Reddit', domains: ['reddit.com', 'www.reddit.com'], keywords: ['reddit'], limit: 60 },
-                'LinkedIn': { name: 'LinkedIn', domains: ['linkedin.com', 'www.linkedin.com'], keywords: ['linkedin'], limit: 60 },
-            };
+            const siteSettings = this.getDefaultSiteSettings();
             this.store.set('siteSettings', siteSettings);
             const allDomains = Object.values(siteSettings).flatMap(s => s.domains);
             this.store.set('blockedDomains', allDomains);
-            console.log('DataManager: Created new site settings with keywords');
+            console.log('DataManager: Created new site settings');
         } else {
             // --- DATA MIGRATION LOGIC ---
-            // This block updates settings for existing users who may be missing keywords
+            // This block updates settings for existing users who may be missing newer fields
+            // or newer sites (ex: Messenger).
             const siteSettings = this.store.get('siteSettings');
             let needsUpdate = false;
 
-            // Define default keywords for migration (based on your debug log analysis)
-            const defaultKeywords = {
-                'YouTube': ['youtube'],
-                'Facebook': ['facebook'],
-                'Instagram': ['instagram'],
-                // --- CHANGE HERE: Made keywords more specific to avoid false positives ---
-                'Twitter/X': ['twitter', 'x.com'],
-                'Reddit': ['reddit'],
-                'LinkedIn': ['linkedin', 'linkedin.com']
-            };
+            const defaults = this.getDefaultSiteSettings();
 
-            for (const siteName in siteSettings) {
-                // If a site is missing the keywords property...
-                if (!siteSettings[siteName].hasOwnProperty('keywords') || !siteSettings[siteName].keywords) {
-                    console.log(`DataManager: Migrating data for ${siteName}: adding missing keywords.`);
-                    // ...add the default keywords for it.
-                    siteSettings[siteName].keywords = defaultKeywords[siteName] || [siteName.toLowerCase()];
+            // 1) Add any new sites that didn't exist previously.
+            for (const defaultSiteName of Object.keys(defaults)) {
+                if (!siteSettings[defaultSiteName]) {
+                    console.log(`DataManager: Migrating data - adding new site "${defaultSiteName}".`);
+                    siteSettings[defaultSiteName] = defaults[defaultSiteName];
+                    // IMPORTANT: Do NOT auto-add newly introduced sites to blockedDomains.
+                    // This avoids surprise blocks for existing users.
                     needsUpdate = true;
                 }
+            }
+
+            // 2) Ensure all sites have required fields and apply safe upgrades.
+            for (const siteName in siteSettings) {
+                const site = siteSettings[siteName];
+                const defaultSite = defaults[siteName];
+
+                // domains
+                if (!Array.isArray(site.domains) || site.domains.length === 0) {
+                    if (defaultSite?.domains) {
+                        site.domains = defaultSite.domains;
+                        needsUpdate = true;
+                    }
+                } else if (defaultSite?.domains) {
+                    // merge in any newly added domains (non-breaking)
+                    const merged = Array.from(new Set([...site.domains, ...defaultSite.domains]));
+                    if (merged.length !== site.domains.length) {
+                        site.domains = merged;
+                        needsUpdate = true;
+                    }
+                }
+
+                // keywords (legacy fallback) + sanitization
+                if (!site.hasOwnProperty('keywords') || !site.keywords) {
+                    site.keywords = defaultSite?.keywords || [siteName.toLowerCase()];
+                    needsUpdate = true;
+                }
+                const sanitized = this.sanitizeKeywords(siteName, site.keywords);
+                if (JSON.stringify(sanitized) !== JSON.stringify(site.keywords)) {
+                    console.log(`DataManager: Sanitized keywords for ${siteName}:`, site.keywords, '->', sanitized);
+                    site.keywords = sanitized;
+                    needsUpdate = true;
+                }
+
+                // matchPatterns (preferred matching mechanism)
+                if (!Array.isArray(site.matchPatterns) || site.matchPatterns.length === 0) {
+                    if (defaultSite?.matchPatterns) {
+                        site.matchPatterns = defaultSite.matchPatterns;
+                        needsUpdate = true;
+                    }
+                }
+
+                // Ensure Twitter/X doesn't contain an "x" keyword from older experiments.
+                if (siteName === 'Twitter/X') {
+                    const mustHave = ['twitter', 'twitter.com', 'x.com'];
+                    const merged = Array.from(new Set([...(site.keywords || []), ...mustHave]));
+                    const sanitizedMerged = this.sanitizeKeywords(siteName, merged);
+                    if (JSON.stringify(sanitizedMerged) !== JSON.stringify(site.keywords)) {
+                        site.keywords = sanitizedMerged;
+                        needsUpdate = true;
+                    }
+                    if (defaultSite?.matchPatterns && JSON.stringify(site.matchPatterns) !== JSON.stringify(defaultSite.matchPatterns)) {
+                        // overwrite with safer patterns
+                        site.matchPatterns = defaultSite.matchPatterns;
+                        needsUpdate = true;
+                    }
+                }
+
+                // Reddit: add subdomains for hosts-file blocking + include redd.it.
+                if (siteName === 'Reddit' && defaultSite?.domains) {
+                    const mergedDomains = Array.from(new Set([...(site.domains || []), ...defaultSite.domains]));
+                    if (mergedDomains.length !== (site.domains || []).length) {
+                        site.domains = mergedDomains;
+                        needsUpdate = true;
+                    }
+                }
+
+                siteSettings[siteName] = site;
             }
 
             // If we made any changes, save the updated object back to the store.
@@ -75,6 +223,13 @@ class DataManager {
         if (!this.store.has(`usage.${today}`)) {
             this.store.set(`usage.${today}`, {});
         }
+
+
+        // Manual "Lock Today" per-site discipline control (strict: no unlock until tomorrow)
+        if (!this.store.has('manualLocks')) {
+            this.store.set('manualLocks', {});
+        }
+        this.cleanupExpiredManualLocks();
     }
 
     // Clean up corrupted usage data
@@ -397,14 +552,56 @@ class DataManager {
         return adherenceData;
     }
 
+    
+    // Manual Locks (Lock Today) - strict: once locked, UI won't allow unlocking until tomorrow.
+    cleanupExpiredManualLocks() {
+        const today = this.getLocalISODate();
+        const locks = this.store.get('manualLocks', {});
+        let changed = false;
+
+        for (const [siteName, lockDate] of Object.entries(locks)) {
+            if (lockDate !== today) {
+                delete locks[siteName];
+                changed = true;
+            }
+        }
+
+        if (changed) {
+            this.store.set('manualLocks', locks);
+        }
+
+        return locks;
+    }
+
+    getManualLocks() {
+        // Ensure we don't keep stale locks around across days
+        return this.cleanupExpiredManualLocks();
+    }
+
+    isSiteLockedToday(siteName) {
+        const today = this.getLocalISODate();
+        const locks = this.store.get('manualLocks', {});
+        return locks[siteName] === today;
+    }
+
+    lockSiteForToday(siteName) {
+        const today = this.getLocalISODate();
+        const locks = this.store.get('manualLocks', {});
+        locks[siteName] = today;
+        this.store.set('manualLocks', locks);
+        return { success: true, siteName, lockedForDate: today };
+    }
+
     // Initial Data for Renderer
     getInitialData() {
         return {
             success: true,
+            today: this.getLocalISODate(),
             siteSettings: this.getSiteSettings(),
             blockedDomains: this.getBlockedDomains(),
             usageData: this.getTodayUsage(),
-            deepWork: this.getDeepWork()
+            deepWork: this.getDeepWork(),
+            manualLocks: this.getManualLocks()
         };
     }
 }

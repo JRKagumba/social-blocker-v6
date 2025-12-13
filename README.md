@@ -1,64 +1,72 @@
 # Social Blocker v6
 
-A desktop social media blocker built with Electron to help you stay focused and productive.
+An Electron desktop app that helps you **limit** and **block** time-wasting sites, with simple on-device usage tracking.
 
-## Description
+## What it does
 
-Social Blocker v6 is a desktop application that helps you manage and block access to social media websites and applications. It provides usage tracking and helps you maintain focus during work or study sessions.
+### Blocking
+- Uses the Windows **hosts file** to block domains at the OS level
+- UI supports **per-site toggles** (batch changes, then apply once) to reduce repeated UAC prompts
+- **Lock Today (strict discipline):** you can click **Lock today** on any site to block it immediately and **prevent unlocking until tomorrow**
+- Deep Work mode can temporarily block a separate list of "deep work sites"
 
-## Features
+### Usage tracking
+- Uses `active-win` to read the current active window's title
+- **Only tracks when the active app is a browser** (`chrome.exe`, `msedge.exe`, etc.)
+- Matches sites using **safe regex patterns** (`matchPatterns`) with a keyword fallback
+  - This specifically prevents the historic **Twitter/X false positive** issue caused by overly-generic keywords like `"x"`
 
-- Block social media websites and applications
-- Track usage statistics
-- System-level blocking using hosts file
-- User-friendly desktop interface
-- Built with Electron for cross-platform compatibility
+## Sites included (defaults)
 
-## Installation
+- YouTube
+- Facebook
+- Instagram
+- Twitter/X
+- Reddit
+- LinkedIn
+- Messenger
 
-### From Source
+Deep Work default list (in `main.js`): `web.whatsapp.com`, `messenger.com`, `www.messenger.com`
 
-1. Clone the repository:
+## Run locally
+
 ```bash
 git clone https://github.com/JRKagumba/social-blocker-v6.git
 cd social-blocker-v6
-```
-
-2. Install dependencies:
-```bash
 npm install
-```
-
-3. Run the application:
-```bash
 npm start
 ```
 
-### Build
+## Build (Windows)
 
-To build the application for distribution:
 ```bash
 npm run build
 ```
 
-## Technologies Used
+## Debugging tips
 
-- Electron
-- JavaScript
-- Node.js
+### App opens the Electron splash screen at Windows startup
+This usually happens if `npm start` (dev mode) accidentally registered the Electron binary to start on login.
+This project only registers startup **in packaged builds**; dev mode forces startup **off**.
 
-## Dependencies
+If you already have a bad startup entry:
+- Open **Task Manager → Startup apps** and disable any "Electron" / unknown entry related to this project
+- Or open **Settings → Apps → Startup** and disable it
 
-- `electron` - Framework for building desktop applications
-- `active-win` - Get information about the active window
-- `electron-store` - Data persistence
-- `sudo-prompt` - Execute commands with elevated privileges
 
-## Author
+### "Twitter/X says I used it all day"
+1) Ensure you're on the updated code (see `usageTracker.js` and `dataManager.js`).
+2) Run the app and use debug mode to capture window titles:
+   - In the main process console: `startDebugMode()`
+   - Then visit X/Twitter for ~10–15 seconds, and also browse unrelated sites.
+3) Inspect the log written to your Downloads folder (path is printed in the console).
 
-Joe Kagumba
+### Add / tweak sites
+Edit **`dataManager.js`** → `getDefaultSiteSettings()`:
+- `domains` affect hosts-file blocking
+- `matchPatterns` affect usage tracking (recommended)
+- `keywords` are a fallback (keep them specific)
 
 ## License
 
 MIT
-

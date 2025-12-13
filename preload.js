@@ -7,6 +7,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // --- Initial Data ---
   getInitialData: () => ipcRenderer.invoke('get-initial-data'),
 
+  // --- Manual Lock Today ---
+  lockSiteForToday: (siteName) => ipcRenderer.invoke('lock-site-for-today', siteName),
+  getManualLocks: () => ipcRenderer.invoke('get-manual-locks'),
+
   // --- Hosts File and Blocking ---
   updateHostsFile: (sitesToBlock) => ipcRenderer.invoke('update-hosts-file', sitesToBlock),
 
