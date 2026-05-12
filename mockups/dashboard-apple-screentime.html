@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<!--
+UI REVAMP MOCKUP — Apple Screen Time aesthetic.
+Soft rounded cards, big bold numerics (monospace), color-as-meaning (green/orange/red),
+generous whitespace, gentle gradients. Personal-accountability-first.
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Dashboard mockup — Apple Screen Time variant</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        :root {
+            --bg: #f5f5f7;
+            --card: #ffffff;
+            --ink: #1d1d1f;
+            --ink-soft: #6e6e73;
+            --line: #e5e5ea;
+            --accent: #007aff;
+            --good: #34c759;
+            --warn: #ff9500;
+            --bad:  #ff3b30;
+        }
+        body { background: var(--bg); color: var(--ink); font-family: -apple-system, "SF Pro Display", BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        .num { font-feature-settings: "tnum"; font-variant-numeric: tabular-nums; }
+        .card { background: var(--card); border-radius: 18px; box-shadow: 0 1px 0 rgba(0,0,0,0.04), 0 8px 24px rgba(0,0,0,0.04); }
+        .pill { display: inline-flex; align-items: center; gap: 4px; padding: 2px 10px; border-radius: 9999px; font-size: 11px; font-weight: 600; }
+        .ring { position: relative; width: 64px; height: 64px; }
+        .ring svg { transform: rotate(-90deg); }
+        /* iOS-style switch */
+        .ios-switch input { display: none; }
+        .ios-switch .track { width: 51px; height: 31px; background: var(--line); border-radius: 9999px; position: relative; transition: background 0.2s; }
+        .ios-switch .knob { position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; background: white; border-radius: 9999px; box-shadow: 0 2px 4px rgba(0,0,0,0.15); transition: transform 0.2s; }
+        .ios-switch input:checked + .track { background: var(--good); }
+        .ios-switch input:checked + .track .knob { transform: translateX(20px); }
+    </style>
+</head>
+<body class="min-h-screen">
+
+    <div class="max-w-3xl mx-auto px-6 py-10">
+
+        <!-- Top: greeting + day picker -->
+        <header class="flex items-end justify-between mb-8">
+            <div>
+                <p class="text-sm" style="color: var(--ink-soft)">Tuesday, May 12</p>
+                <h1 class="text-4xl font-bold tracking-tight">Today</h1>
+            </div>
+            <div class="flex items-center gap-2">
+                <button class="card px-3 py-2 text-sm font-medium">&larr; Yesterday</button>
+                <button class="card px-3 py-2 text-sm font-medium" style="color: var(--ink-soft); cursor: not-allowed;">Tomorrow &rarr;</button>
+            </div>
+        </header>
+
+        <!-- Hero card: total time -->
+        <section class="card p-8 mb-6 flex items-center justify-between">
+            <div>
+                <p class="text-sm font-semibold uppercase tracking-wider" style="color: var(--ink-soft)">Screen time today</p>
+                <h2 class="num text-6xl font-bold mt-2">1<span class="text-3xl" style="color: var(--ink-soft)">h</span> 47<span class="text-3xl" style="color: var(--ink-soft)">m</span></h2>
+                <p class="text-sm mt-3" style="color: var(--good)">&darr; 38m vs your daily average</p>
+            </div>
+            <!-- Ring chart -->
+            <div class="ring">
+                <svg width="64" height="64">
+                    <circle cx="32" cy="32" r="28" stroke="#e5e5ea" stroke-width="6" fill="none"/>
+                    <circle cx="32" cy="32" r="28" stroke="var(--warn)" stroke-width="6" fill="none"
+                            stroke-dasharray="175.93" stroke-dashoffset="48" stroke-linecap="round"/>
+                </svg>
+                <span class="absolute inset-0 flex items-center justify-center text-sm font-semibold num">73%</span>
+            </div>
+        </section>
+
+        <!-- Per-site cards -->
+        <section class="space-y-3 mb-8">
+            <h3 class="text-sm font-semibold uppercase tracking-wider px-2" style="color: var(--ink-soft)">Apps</h3>
+
+            <!-- Instagram - over -->
+            <div class="card px-5 py-4 flex items-center gap-4">
+                <div class="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold" style="background: linear-gradient(135deg, #833ab4, #fd1d1d, #fcb045);">IG</div>
+                <div class="flex-1">
+                    <div class="flex justify-between items-baseline">
+                        <span class="font-semibold">Instagram</span>
+                        <span class="num text-sm font-semibold" style="color: var(--bad)">62m / 60m</span>
+                    </div>
+                    <div class="mt-2 h-1.5 rounded-full overflow-hidden" style="background: var(--line)">
+                        <div class="h-full" style="width: 100%; background: var(--bad)"></div>
+                    </div>
+                </div>
+                <span class="pill" style="background: rgba(255,59,48,0.12); color: var(--bad)">Over</span>
+            </div>
+
+            <!-- Reddit - warn -->
+            <div class="card px-5 py-4 flex items-center gap-4">
+                <div class="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold" style="background: #ff4500;">R</div>
+                <div class="flex-1">
+                    <div class="flex justify-between items-baseline">
+                        <span class="font-semibold">Reddit</span>
+                        <span class="num text-sm font-semibold" style="color: var(--warn)">48m / 60m</span>
+                    </div>
+                    <div class="mt-2 h-1.5 rounded-full overflow-hidden" style="background: var(--line)">
+                        <div class="h-full" style="width: 80%; background: var(--warn)"></div>
+                    </div>
+                </div>
+                <span class="pill" style="background: rgba(255,149,0,0.12); color: var(--warn)">Close</span>
+            </div>
+
+            <!-- YouTube - ok -->
+            <div class="card px-5 py-4 flex items-center gap-4">
+                <div class="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold" style="background: #ff0000;">YT</div>
+                <div class="flex-1">
+                    <div class="flex justify-between items-baseline">
+                        <span class="font-semibold">YouTube</span>
+                        <span class="num text-sm" style="color: var(--ink-soft)">21m / 60m</span>
+                    </div>
+                    <div class="mt-2 h-1.5 rounded-full overflow-hidden" style="background: var(--line)">
+                        <div class="h-full" style="width: 35%; background: var(--accent)"></div>
+                    </div>
+                </div>
+                <label class="ios-switch">
+                    <input type="checkbox" />
+                    <div class="track"><div class="knob"></div></div>
+                </label>
+            </div>
+
+            <!-- Twitter/X -->
+            <div class="card px-5 py-4 flex items-center gap-4">
+                <div class="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold bg-black">X</div>
+                <div class="flex-1">
+                    <div class="flex justify-between items-baseline">
+                        <span class="font-semibold">Twitter/X</span>
+                        <span class="num text-sm" style="color: var(--ink-soft)">5m / 60m</span>
+                    </div>
+                    <div class="mt-2 h-1.5 rounded-full overflow-hidden" style="background: var(--line)">
+                        <div class="h-full" style="width: 8%; background: var(--accent)"></div>
+                    </div>
+                </div>
+                <label class="ios-switch">
+                    <input type="checkbox" />
+                    <div class="track"><div class="knob"></div></div>
+                </label>
+            </div>
+
+            <!-- Facebook -->
+            <div class="card px-5 py-4 flex items-center gap-4 opacity-70">
+                <div class="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold" style="background: #1877f2;">f</div>
+                <div class="flex-1">
+                    <div class="flex justify-between items-baseline">
+                        <span class="font-semibold">Facebook</span>
+                        <span class="num text-sm" style="color: var(--ink-soft)">0m / 60m</span>
+                    </div>
+                    <div class="mt-2 h-1.5 rounded-full overflow-hidden" style="background: var(--line)">
+                        <div class="h-full" style="width: 0%"></div>
+                    </div>
+                </div>
+                <span class="pill" style="background: var(--line); color: var(--ink-soft)">Blocked</span>
+            </div>
+        </section>
+
+        <!-- Deep work card -->
+        <section class="card p-6 mb-6 flex items-center justify-between" style="background: linear-gradient(135deg, #007aff, #5856d6); color: white;">
+            <div>
+                <p class="text-xs uppercase tracking-widest opacity-80">Deep Work</p>
+                <h3 class="num text-3xl font-bold mt-1">1h 14m left</h3>
+                <p class="text-sm opacity-80 mt-1">5 sites blocked &middot; ends 6:46 PM</p>
+            </div>
+            <button class="bg-white/20 hover:bg-white/30 px-4 py-2 rounded-full text-sm font-semibold">End early</button>
+        </section>
+
+        <!-- Friction + master toggle -->
+        <section class="grid grid-cols-2 gap-4 mb-8">
+            <div class="card p-5">
+                <p class="text-xs uppercase tracking-wider" style="color: var(--ink-soft)">Unblocks today</p>
+                <p class="num text-3xl font-bold mt-2" style="color: var(--bad)">3</p>
+            </div>
+            <div class="card p-5 flex items-center justify-between">
+                <div>
+                    <p class="text-xs uppercase tracking-wider" style="color: var(--ink-soft)">Master Blocker</p>
+                    <p class="text-lg font-bold mt-2" style="color: var(--good)">ON</p>
+                </div>
+                <label class="ios-switch">
+                    <input type="checkbox" checked />
+                    <div class="track"><div class="knob"></div></div>
+                </label>
+            </div>
+        </section>
+
+        <!-- Notes -->
+        <section class="card p-6 text-sm" style="color: var(--ink-soft)">
+            <h3 class="font-semibold mb-3" style="color: var(--ink)">Aesthetic notes</h3>
+            <ul class="space-y-1.5 list-disc list-inside">
+                <li>Light mode (matches macOS / iOS default). Dark variant trivial via CSS variables.</li>
+                <li>Numbers in tabular-figure SF Pro / Segoe UI &mdash; no jitter when bars animate.</li>
+                <li>Color is meaning, not decoration: green = good, orange = warn, red = over.</li>
+                <li>Real iOS switches with snap animation &mdash; no more red/green &ldquo;ON/OFF&rdquo; toggles.</li>
+                <li>Deep Work card uses Apple&rsquo;s signature blue-purple gradient as the &ldquo;focused&rdquo; cue.</li>
+                <li>App icons are flat colored badges, not images &mdash; portable, no external assets needed.</li>
+            </ul>
+        </section>
+    </div>
+</body>
+</html>

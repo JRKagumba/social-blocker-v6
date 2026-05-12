@@ -20,6 +20,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   
   // --- Deep Work Mode ---
   startDeepWork: (durationInSeconds) => ipcRenderer.invoke('start-deep-work', durationInSeconds),
+  endDeepWork: () => ipcRenderer.invoke('end-deep-work'),
+  getDeepWorkConfig: () => ipcRenderer.invoke('get-deep-work-config'),
+  setDeepWorkConfig: (partial) => ipcRenderer.invoke('set-deep-work-config', partial),
   
   // --- History and Logging ---
   getHistory: () => ipcRenderer.invoke('get-history'),
@@ -41,8 +44,36 @@ contextBridge.exposeInMainWorld('electronAPI', {
   resumeUsageTracker: () => ipcRenderer.invoke('resume-usage-tracker'),
   clearUsageData: () => ipcRenderer.invoke('clear-usage-data'),
 
+  // --- Digest / Local-HTML Reports ---
+  getReportSettings: () => ipcRenderer.invoke('get-report-settings'),
+  setReportSettings: (partial) => ipcRenderer.invoke('set-report-settings', partial),
+  generateDigestNow: (period) => ipcRenderer.invoke('generate-digest-now', period),
+  openReportFolder: () => ipcRenderer.invoke('open-report-folder'),
+
+  // --- Auto-Update ---
+  updaterCheckNow: () => ipcRenderer.invoke('updater-check-now'),
+  updaterInstallNow: () => ipcRenderer.invoke('updater-install-now'),
+  updaterGetStatus: () => ipcRenderer.invoke('updater-get-status'),
+
+  // --- HUD widget ---
+  hudShow: () => ipcRenderer.invoke('hud-show'),
+  hudHide: () => ipcRenderer.invoke('hud-hide'),
+  hudToggle: () => ipcRenderer.invoke('hud-toggle'),
+  hudGetConfig: () => ipcRenderer.invoke('hud-get-config'),
+  hudSetConfig: (partial) => ipcRenderer.invoke('hud-set-config', partial),
+
   // --- Real-time Listeners (Main -> Renderer) ---
   onUsageUpdate: (callback) => ipcRenderer.on('usage-updated', (_event, value) => callback(value)),
   onDeepWorkUpdate: (callback) => ipcRenderer.on('deep-work-update', (_event, value) => callback(value)),
+<<<<<<< Updated upstream
+=======
+  repairHostsNow: () => ipcRenderer.invoke('repair-hosts-now'),
+  onHostsIntegrityUpdate: (callback) =>
+    ipcRenderer.on('hosts-integrity-update', (_event, payload) => callback(payload)),
+  onCalendarDayChanged: (callback) =>
+    ipcRenderer.on('calendar-day-changed', (_event, payload) => callback(payload)),
+  onUpdateReady: (callback) =>
+    ipcRenderer.on('update-ready', (_event, payload) => callback(payload)),
+>>>>>>> Stashed changes
 });
 

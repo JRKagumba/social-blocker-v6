@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<!--
+HUD widget — small always-on-top window that displays live per-site usage.
+Loaded by main.js into a frameless transparent BrowserWindow at 260x160 anchored
+to the bottom-right of the primary display. Receives 'usage-updated' / 'deep-work-update'
+events via hudPreload.js (window.hudAPI).
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline';">
+    <title>FocusGuard HUD</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        html, body {
+            width: 100%; height: 100%; overflow: hidden;
+            background: transparent;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            color: #e2e8f0;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+        #hud {
+            width: 260px; height: 160px;
+            background: rgba(15, 23, 42, 0.95);
+            border: 1px solid rgba(34, 211, 238, 0.3);
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(8px);
+            display: flex; flex-direction: column;
+            -webkit-app-region: drag;
+            overflow: hidden;
+        }
+        button, #close-hud, #hud-rows { -webkit-app-region: no-drag; }
+        header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 6px 10px; border-bottom: 1px solid rgba(51, 65, 85, 0.6);
+        }
+        .brand { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; color: #e2e8f0; }
+        .brand-dot { width: 8px; height: 8px; border-radius: 50%; background: #22d3ee; }
+        .total { font-size: 10px; color: #94a3b8; font-feature-settings: "tnum"; }
+        #close-hud {
+            background: transparent; border: 0; color: #64748b; font-size: 14px; cursor: pointer; padding: 0 4px;
+        }
+        #close-hud:hover { color: #e2e8f0; }
+        #hud-rows {
+            flex: 1; padding: 6px 10px; display: flex; flex-direction: column; gap: 5px;
+            overflow-y: auto;
+        }
+        #hud-rows::-webkit-scrollbar { display: none; }
+        .row { display: flex; align-items: center; gap: 6px; font-size: 11px; }
+        .row .name { width: 54px; color: #cbd5e1; flex-shrink: 0; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .row .bar-track { flex: 1; height: 6px; background: #0f172a; border-radius: 9999px; overflow: hidden; }
+        .row .bar { height: 100%; background: #22d3ee; border-radius: 9999px; transition: width 0.4s ease, background 0.2s; }
+        .row .num { width: 50px; text-align: right; font-feature-settings: "tnum"; font-family: ui-monospace, "Cascadia Mono", monospace; font-size: 10px; color: #cbd5e1; }
+        .row.warn .bar { background: #f59e0b; }
+        .row.warn .num { color: #fcd34d; }
+        .row.over .bar { background: #ef4444; }
+        .row.over .num { color: #fca5a5; }
+        .row.idle .num { color: #64748b; }
+        footer {
+            font-size: 10px; padding: 4px 10px;
+            display: flex; justify-content: space-between; align-items: center;
+            background: rgba(8, 51, 68, 0.4);
+            border-top: 1px solid rgba(8, 145, 178, 0.4);
+            color: #67e8f9;
+        }
+        footer.hidden { display: none; }
+        .empty { color: #64748b; font-size: 11px; text-align: center; padding: 20px 10px; }
+    </style>
+</head>
+<body>
+    <div id="hud">
+        <header>
+            <div class="brand">
+                <span class="brand-dot"></span>
+                <span>FocusGuard</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:6px;">
+                <span class="total" id="hud-total">0m today</span>
+                <button id="close-hud" title="Hide HUD">&times;</button>
+            </div>
+        </header>
+        <div id="hud-rows">
+            <div class="empty" id="hud-empty">Waiting for activity&hellip;</div>
+        </div>
+        <footer id="hud-deepwork" class="hidden">
+            <span>&bull; Deep Work</span>
+            <span id="hud-dw-time">--</span>
+        </footer>
+    </div>
+    <script src="hudRenderer.js"></script>
+</body>
+</html>

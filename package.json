@@ -17,13 +17,25 @@
     "dependencies": {
       "active-win": "^8.1.0",
       "electron-store": "^8.2.0",
+      "electron-updater": "^6.3.0",
       "sudo-prompt": "^9.2.1"
     },
   "build": {
     "appId": "com.yourname.socialblockerv6",
     "files": [
       "**/*",
-      "icon.ico"
+      "icon.ico",
+      "!mockups/**/*",
+      "!tests/**/*",
+      "!SocialBlocker_v6-Updated_Product_Roadmap.docx",
+      "!TESTING_GUIDE.md",
+      "!social_blocker_debug_log.txt"
+    ],
+    "extraResources": [
+      {
+        "from": "icon.ico",
+        "to": "icon.ico"
+      }
     ],
     "win": {
       "target": "nsis",
@@ -32,7 +44,16 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "JRKagumba",
+        "repo": "social-blocker-v6",
+        "private": true,
+        "releaseType": "release"
+      }
+    ]
   }
   }
   

@@ -67,9 +67,38 @@ class UsageTracker {
                 return;
             }
 
+<<<<<<< Updated upstream
             const windowTitle = windowInfo.title.toLowerCase();
             const appName = windowInfo.owner?.name?.toLowerCase() || 'unknown';
             console.log(`Usage Tracker: Active window - "${windowTitle}" (App: ${appName})`);
+=======
+            // HUD fullscreen-policy hook — runs on every tick regardless of browser/non-browser.
+            // Lives here because we already have active-win bounds for free; main.js doesn't.
+            try {
+                if (typeof global.applyHudFullscreenPolicy === 'function') {
+                    global.applyHudFullscreenPolicy(windowInfo.bounds);
+                }
+            } catch (e) { /* never let HUD policy break tracking */ }
+
+            // Guard against null/undefined titles (it happens).
+            const windowTitleRaw = windowInfo.title || '';
+            const windowTitle = windowTitleRaw.toLowerCase();
+            const ownerName = (windowInfo.owner?.name || '').toLowerCase();
+            const ownerPath = (windowInfo.owner?.path || '').toLowerCase();
+            console.log(`Usage Tracker: Active window - "${windowTitle}" (Owner: ${ownerName})`);
+
+            // Permissive browser detection — active-win returns either the basename ("chrome.exe")
+            // or the file description ("Google Chrome") depending on Windows version + install type.
+            // Matching against BOTH owner.name and owner.path catches every observed variant.
+            const browserIdentifiers = ['chrome', 'msedge', 'edge', 'brave', 'firefox', 'opera', 'vivaldi'];
+            const isBrowser = browserIdentifiers.some(id =>
+                ownerName.includes(id) || ownerPath.includes(`\\${id}.exe`)
+            );
+            if (!isBrowser) {
+                console.log(`Usage Tracker: Skipping non-browser owner: "${ownerName}"`);
+                return;
+            }
+>>>>>>> Stashed changes
             
             const allSiteSettings = this.dataManager.getSiteSettings();
             let usageUpdated = false;
@@ -156,6 +185,11 @@ class UsageTracker {
                     console.log('📤 Usage Tracker: ✅ Usage data sent to renderer successfully');
                 } else {
                     console.log('📤 Usage Tracker: ❌ No mainWindow or webContents available');
+                }
+                // Mirror to HUD window if it exists and isn't destroyed.
+                if (global.hudWindow && !global.hudWindow.isDestroyed() && global.hudWindow.webContents) {
+                    try { global.hudWindow.webContents.send('usage-updated', usageDataToSend); }
+                    catch (e) { console.warn('HUD usage broadcast failed:', e.message); }
                 }
             } else {
                 console.log('📤 Usage Tracker: No usage updated this cycle');

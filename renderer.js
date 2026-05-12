@@ -49,6 +49,70 @@ let savedToggleStates = {}; // The state saved to disk (current reality)
 let pendingToggleStates = {}; // The state shown in UI (pending changes)
 let hasPendingChanges = false;
 
+<<<<<<< Updated upstream
+=======
+
+function getLocalISODate() {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+function normalizeCommitmentText(s) {
+    return String(s ?? '').replace(/\r\n/g, '\n').replace(/\s+$/gm, '').trimEnd();
+}
+
+function syncBannerStackPlacement() {
+    if (!deepWorkBanner || !hostsIntegrityBanner || !pendingChangesBanner) return;
+    const deepOn = !deepWorkBanner.classList.contains('hidden');
+    const hostsOn = !hostsIntegrityBanner.classList.contains('hidden');
+
+    hostsIntegrityBanner.style.top = deepOn ? '42px' : '0';
+
+    let pendingTop = 0;
+    if (deepOn) pendingTop += 42;
+    if (hostsOn) pendingTop += 44;
+    pendingChangesBanner.style.top = `${pendingTop}px`;
+}
+
+async function reloadDashboardFromMain(reason = '') {
+    const data = await window.electronAPI.getInitialData();
+    if (!data.success) return;
+    siteSettings = data.siteSettings;
+    renderSiteList(data.blockedDomains, data.usageData, data.manualLocks, data.today);
+    updateMasterStatusText();
+    deepWorkConfigCache = data.deepWorkConfig || deepWorkConfigCache;
+    deepWorkSpecialCache = data.deepWorkSpecialSites || deepWorkSpecialCache;
+    renderDeepWorkEditor();
+    updateDeepWorkUI(data.deepWork);
+    updateHostsIntegrityBanner(data.hostsIntegrity);
+    await renderHistoryChart();
+    if (reason) console.log('Renderer: dashboard reloaded —', reason);
+}
+
+function updateHostsIntegrityBanner(integrity) {
+    if (!hostsIntegrityBanner || !hostsIntegrityText) return;
+    if (!integrity || integrity.ok) {
+        hostsIntegrityBanner.classList.add('hidden');
+        syncBannerStackPlacement();
+        return;
+    }
+    const miss = (integrity.unexpectedMissing && integrity.unexpectedMissing.length)
+        ? ` Missing: ${integrity.unexpectedMissing.slice(0, 6).join(', ')}${integrity.unexpectedMissing.length > 6 ? '…' : ''}.`
+        : '';
+    const extra = (integrity.unexpectedExtra && integrity.unexpectedExtra.length)
+        ? ` Unexpected: ${integrity.unexpectedExtra.slice(0, 4).join(', ')}${integrity.unexpectedExtra.length > 4 ? '…' : ''}.`
+        : '';
+    hostsIntegrityText.textContent =
+        `Hosts file out of sync with the app (was it edited outside Social Blocker?).${miss}${extra} Click Repair or Save & Apply.`;
+    hostsIntegrityBanner.classList.remove('hidden');
+    syncBannerStackPlacement();
+}
+
+
+>>>>>>> Stashed changes
 // --- Initialization ---
 window.addEventListener('DOMContentLoaded', async () => {
     const initialData = await window.electronAPI.getInitialData();
@@ -60,8 +124,118 @@ window.addEventListener('DOMContentLoaded', async () => {
         await renderHistoryChart();
     }
     setupEventListeners();
+    initReportsPanel(initialData?.reportSettings);
+    initDeepWorkEditor(initialData);
+    // Ensure DW badges + disable states reflect any session that was already running at load.
+    syncDeepWorkEditorActiveState(!!(initialData?.deepWork?.isActive), initialData?.deepWork?.remainingMs || 0);
     showTab('dashboard');
 });
+
+// ---------------------------------------------------------------------------
+// Reports / Digest panel (Data tab)
+// ---------------------------------------------------------------------------
+function formatReportTimestamp(iso) {
+    if (!iso) return 'never';
+    try {
+        return new Date(iso).toLocaleString('en-US', {
+            month: 'short', day: 'numeric', year: 'numeric',
+            hour: '2-digit', minute: '2-digit'
+        });
+    } catch { return 'never'; }
+}
+
+function renderReportSettings(settings) {
+    if (!settings) return;
+    const folderEl = document.getElementById('report-folder-display');
+    const weeklyEl = document.getElementById('report-weekly-toggle');
+    const monthlyEl = document.getElementById('report-monthly-toggle');
+    const autoOpenEl = document.getElementById('report-autoopen-toggle');
+    const lastWeeklyEl = document.getElementById('report-last-weekly');
+    const lastMonthlyEl = document.getElementById('report-last-monthly');
+
+    if (folderEl) folderEl.textContent = settings.targetFolder || '(unset)';
+    if (weeklyEl) weeklyEl.checked = !!settings.weeklyEnabled;
+    if (monthlyEl) monthlyEl.checked = !!settings.monthlyEnabled;
+    if (autoOpenEl) autoOpenEl.checked = !!settings.autoOpenOnGenerate;
+    if (lastWeeklyEl) lastWeeklyEl.textContent = formatReportTimestamp(settings.lastWeeklyGeneratedAt);
+    if (lastMonthlyEl) lastMonthlyEl.textContent = formatReportTimestamp(settings.lastMonthlyGeneratedAt);
+}
+
+function showReportStatus(message, type = 'info') {
+    const el = document.getElementById('report-status');
+    if (!el) return;
+    const color = type === 'error' ? 'text-red-400'
+                : type === 'success' ? 'text-green-400'
+                : type === 'busy' ? 'text-amber-300'
+                : 'text-gray-400';
+    el.className = `text-sm min-h-[1.5rem] ${color}`;
+    el.textContent = message;
+}
+
+async function refreshReportSettings() {
+    try {
+        const settings = await window.electronAPI.getReportSettings();
+        renderReportSettings(settings);
+    } catch (e) {
+        console.error('refreshReportSettings:', e);
+    }
+}
+
+async function handleGenerate(period) {
+    showReportStatus(`Generating ${period} digest…`, 'busy');
+    try {
+        const res = await window.electronAPI.generateDigestNow(period);
+        if (res?.success) {
+            showReportStatus(`✓ Saved to ${res.filepath}`, 'success');
+            await refreshReportSettings();
+        } else {
+            showReportStatus(`✗ Failed: ${res?.error || 'unknown error'}`, 'error');
+        }
+    } catch (e) {
+        showReportStatus(`✗ Failed: ${e.message}`, 'error');
+    }
+}
+
+function initReportsPanel(initialSettings) {
+    renderReportSettings(initialSettings);
+
+    const weeklyEl = document.getElementById('report-weekly-toggle');
+    const monthlyEl = document.getElementById('report-monthly-toggle');
+    const autoOpenEl = document.getElementById('report-autoopen-toggle');
+    const openFolderBtn = document.getElementById('open-report-folder-btn');
+    const editFolderBtn = document.getElementById('edit-report-folder-btn');
+    const generateWeeklyBtn = document.getElementById('generate-weekly-now-btn');
+    const generateMonthlyBtn = document.getElementById('generate-monthly-now-btn');
+
+    weeklyEl?.addEventListener('change', async () => {
+        await window.electronAPI.setReportSettings({ weeklyEnabled: weeklyEl.checked });
+        showReportStatus(weeklyEl.checked ? 'Weekly auto-generation enabled.' : 'Weekly auto-generation paused.');
+    });
+    monthlyEl?.addEventListener('change', async () => {
+        await window.electronAPI.setReportSettings({ monthlyEnabled: monthlyEl.checked });
+        showReportStatus(monthlyEl.checked ? 'Monthly auto-generation enabled.' : 'Monthly auto-generation paused.');
+    });
+    autoOpenEl?.addEventListener('change', async () => {
+        await window.electronAPI.setReportSettings({ autoOpenOnGenerate: autoOpenEl.checked });
+        showReportStatus(autoOpenEl.checked ? 'Reports will auto-open after generation.' : 'Reports will be saved silently.');
+    });
+    openFolderBtn?.addEventListener('click', async () => {
+        const res = await window.electronAPI.openReportFolder();
+        if (!res?.success) showReportStatus(`✗ Could not open folder: ${res?.error}`, 'error');
+    });
+    editFolderBtn?.addEventListener('click', async () => {
+        const current = (await window.electronAPI.getReportSettings())?.targetFolder || '';
+        // Prompt is OK for now; a native folder-picker can come later with dialog.showOpenDialog.
+        const next = window.prompt('Folder where digest HTML files will be saved:', current);
+        if (next && next.trim() && next.trim() !== current) {
+            await window.electronAPI.setReportSettings({ targetFolder: next.trim() });
+            await refreshReportSettings();
+            showReportStatus('Save folder updated.');
+        }
+    });
+    generateWeeklyBtn?.addEventListener('click', () => handleGenerate('weekly'));
+    generateMonthlyBtn?.addEventListener('click', () => handleGenerate('monthly'));
+}
 
 // --- Real-time Listeners ---
 window.electronAPI.onUsageUpdate(handleUsageUpdate);
@@ -827,6 +1001,237 @@ async function lockSiteForToday(siteName) {
     }
 }
 
+<<<<<<< Updated upstream
+=======
+
+
+function updateMasterStatusText() {
+    const total = Object.keys(siteSettings).length;
+    const blockedCount = document.querySelectorAll('.individual-toggle:checked').length;
+    statusText.textContent = `${blockedCount} / ${total} SITES BLOCKED`;
+    statusText.className = 'mr-4 text-lg font-bold transition-colors';
+    if (blockedCount === 0) statusText.classList.add('text-green-500');
+    else if (blockedCount === total) statusText.classList.add('text-red-500');
+    else statusText.classList.add('text-yellow-500');
+}
+
+function showTab(tabName) {
+    Object.values(contents).forEach(c => c.classList.add('hidden'));
+    Object.values(tabs).forEach(t => t.classList.replace('tab-active', 'tab-inactive'));
+    contents[tabName].classList.remove('hidden');
+    tabs[tabName].classList.replace('tab-inactive', 'tab-active');
+}
+
+function updateDeepWorkUI(deepWork) {
+    const ms = (() => {
+        if (!deepWork) return 0;
+        if (typeof deepWork.remainingMs === 'number') return deepWork.remainingMs;
+        if (typeof deepWork.remaining === 'number') return deepWork.remaining;
+        return 0;
+    })();
+
+    const isActive = !!(deepWork && deepWork.isActive && ms > 0);
+
+    if (isActive) {
+        deepWorkBanner.classList.remove('hidden');
+        const minutes = Math.floor(ms / 60000);
+        const seconds = Math.floor((ms % 60000) / 1000).toString().padStart(2, '0');
+        deepWorkTimer.textContent = `Deep Work session active. Time remaining: ${minutes}:${seconds}`;
+        deepWorkBtn.disabled = true;
+        deepWorkBtn.textContent = 'Session Active';
+    } else {
+        deepWorkBanner.classList.add('hidden');
+        deepWorkBtn.disabled = false;
+        deepWorkBtn.textContent = 'Start Deep Work';
+    }
+    syncBannerStackPlacement();
+    syncDeepWorkEditorActiveState(isActive, ms);
+}
+
+// ---------------------------------------------------------------------------
+// Deep Work editor (Item C)
+// ---------------------------------------------------------------------------
+let deepWorkConfigCache = null;
+let deepWorkSpecialCache = null;
+
+function formatDwInline(ms) {
+    const totalMin = Math.floor(ms / 60000);
+    if (totalMin >= 60) return `${Math.floor(totalMin / 60)}h ${totalMin % 60}m`;
+    return `${totalMin}m`;
+}
+
+/** Renders the default-sites checkboxes + custom-domain chips from current config. */
+function renderDeepWorkEditor() {
+    if (!deepWorkConfigCache || !siteSettings) return;
+    const defaultsContainer = document.getElementById('deep-work-default-sites');
+    const chipsContainer = document.getElementById('deep-work-custom-chips');
+    if (!defaultsContainer || !chipsContainer) return;
+
+    // Available choices = every key in siteSettings PLUS each special site (Messenger, etc.)
+    const choiceNames = [
+        ...Object.keys(siteSettings),
+        ...Object.keys(deepWorkSpecialCache || {})
+    ];
+    const selectedSet = new Set(deepWorkConfigCache.selectedSites || []);
+
+    defaultsContainer.innerHTML = choiceNames.map(name => {
+        const checked = selectedSet.has(name) ? 'checked' : '';
+        const isSpecial = !!(deepWorkSpecialCache && deepWorkSpecialCache[name]);
+        const badge = isSpecial
+            ? '<span class="text-[10px] text-purple-300 bg-purple-900/40 px-1.5 py-0.5 rounded ml-1">extra</span>'
+            : '';
+        const safeName = String(name).replace(/"/g, '&quot;');
+        return `
+            <label class="flex items-center gap-3 bg-gray-900/50 border border-gray-700 rounded-lg px-3 py-2 hover:bg-gray-900 cursor-pointer">
+                <input type="checkbox" class="dw-default-site w-4 h-4 accent-cyan-500" data-site-name="${safeName}" ${checked} />
+                <span class="text-sm">${safeName}${badge}</span>
+            </label>`;
+    }).join('');
+
+    chipsContainer.innerHTML = (deepWorkConfigCache.customDomains || []).map(d => {
+        const safe = String(d).replace(/"/g, '&quot;');
+        return `
+            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-700/40 border border-purple-500/40 text-purple-100 text-xs font-mono">
+                ${safe}
+                <button class="dw-chip-remove text-purple-200 hover:text-white" data-domain="${safe}">&times;</button>
+            </span>`;
+    }).join('') || '<span class="text-xs text-gray-500 italic">No custom domains yet.</span>';
+}
+
+/** Disables the editor + every site toggle on the dashboard while a session is running. */
+function syncDeepWorkEditorActiveState(isActive, remainingMs) {
+    const card = document.getElementById('deep-work-card');
+    const activeBanner = document.getElementById('deep-work-active-banner');
+    const inlineTimer = document.getElementById('deep-work-inline-timer');
+    const startRow = document.getElementById('deep-work-start-row');
+    const editorSection = document.getElementById('deep-work-editor-section');
+    const endRow = document.getElementById('deep-work-end-early-row');
+    const statusPill = document.getElementById('deep-work-status-pill');
+
+    if (card) card.classList.toggle('border-cyan-500/50', isActive);
+
+    if (isActive) {
+        activeBanner?.classList.remove('hidden');
+        if (inlineTimer) inlineTimer.textContent = formatDwInline(remainingMs);
+        startRow?.classList.add('opacity-40', 'pointer-events-none');
+        editorSection?.classList.add('opacity-40', 'pointer-events-none');
+        endRow?.classList.remove('hidden');
+        if (statusPill) {
+            statusPill.textContent = 'Session active';
+            statusPill.className = 'text-xs text-cyan-200 bg-cyan-700/40 rounded-full px-3 py-1 font-semibold';
+        }
+    } else {
+        activeBanner?.classList.add('hidden');
+        startRow?.classList.remove('opacity-40', 'pointer-events-none');
+        editorSection?.classList.remove('opacity-40', 'pointer-events-none');
+        endRow?.classList.add('hidden');
+        if (statusPill) {
+            statusPill.textContent = 'Idle — not running';
+            statusPill.className = 'text-xs text-gray-400 bg-gray-700/50 rounded-full px-3 py-1';
+        }
+    }
+
+    // Force-disable every per-site toggle on the dashboard during deep work + add DW badge.
+    document.querySelectorAll('.individual-toggle').forEach(input => {
+        if (isActive) {
+            input.dataset.preDwDisabled = input.disabled ? '1' : '0';
+            input.disabled = true;
+        } else if (input.dataset.preDwDisabled !== undefined) {
+            input.disabled = input.dataset.preDwDisabled === '1';
+            delete input.dataset.preDwDisabled;
+        }
+    });
+    document.querySelectorAll('.lock-today-btn').forEach(btn => {
+        btn.disabled = isActive;
+        btn.classList.toggle('opacity-50', isActive);
+        btn.classList.toggle('cursor-not-allowed', isActive);
+    });
+    // Badge on each site row showing DW status.
+    document.querySelectorAll('#blocked-sites-list > li').forEach(li => {
+        const existing = li.querySelector('.dw-badge');
+        if (isActive && !existing) {
+            const badge = document.createElement('span');
+            badge.className = 'dw-badge text-[10px] text-cyan-200 bg-cyan-700/40 px-2 py-0.5 rounded ml-2 font-semibold tracking-wide';
+            badge.textContent = 'DEEP WORK';
+            const heading = li.querySelector('span.text-lg');
+            if (heading) heading.appendChild(badge);
+        } else if (!isActive && existing) {
+            existing.remove();
+        }
+    });
+}
+
+async function refreshDeepWorkConfig() {
+    try {
+        const payload = await window.electronAPI.getDeepWorkConfig();
+        deepWorkConfigCache = payload?.config || null;
+        deepWorkSpecialCache = payload?.specialSites || null;
+        renderDeepWorkEditor();
+    } catch (e) {
+        console.error('refreshDeepWorkConfig:', e);
+    }
+}
+
+function initDeepWorkEditor(initialPayload) {
+    if (initialPayload) {
+        deepWorkConfigCache = initialPayload.deepWorkConfig || null;
+        deepWorkSpecialCache = initialPayload.deepWorkSpecialSites || null;
+    }
+    renderDeepWorkEditor();
+
+    const defaultsContainer = document.getElementById('deep-work-default-sites');
+    const chipsContainer = document.getElementById('deep-work-custom-chips');
+    const customInput = document.getElementById('deep-work-custom-input');
+    const customAddBtn = document.getElementById('deep-work-custom-add-btn');
+    const endEarlyBtn = document.getElementById('deep-work-end-early-btn');
+
+    defaultsContainer?.addEventListener('change', async (e) => {
+        if (!e.target.classList?.contains('dw-default-site')) return;
+        const name = e.target.dataset.siteName;
+        if (!name || !deepWorkConfigCache) return;
+        const set = new Set(deepWorkConfigCache.selectedSites);
+        if (e.target.checked) set.add(name); else set.delete(name);
+        const next = await window.electronAPI.setDeepWorkConfig({ selectedSites: Array.from(set) });
+        deepWorkConfigCache = next;
+    });
+
+    chipsContainer?.addEventListener('click', async (e) => {
+        const btn = e.target.closest('.dw-chip-remove');
+        if (!btn) return;
+        const domain = btn.dataset.domain;
+        if (!domain || !deepWorkConfigCache) return;
+        const remaining = (deepWorkConfigCache.customDomains || []).filter(d => d !== domain);
+        const next = await window.electronAPI.setDeepWorkConfig({ customDomains: remaining });
+        deepWorkConfigCache = next;
+        renderDeepWorkEditor();
+    });
+
+    const addCustom = async () => {
+        if (!customInput || !deepWorkConfigCache) return;
+        const raw = customInput.value.trim();
+        if (!raw) return;
+        const merged = Array.from(new Set([...(deepWorkConfigCache.customDomains || []), raw]));
+        const next = await window.electronAPI.setDeepWorkConfig({ customDomains: merged });
+        deepWorkConfigCache = next;
+        customInput.value = '';
+        renderDeepWorkEditor();
+        if (!next.customDomains.includes(raw.toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, ''))) {
+            customInput.placeholder = 'invalid domain — try news.ycombinator.com';
+            setTimeout(() => { customInput.placeholder = 'add a domain (e.g. news.ycombinator.com)'; }, 2500);
+        }
+    };
+    customAddBtn?.addEventListener('click', addCustom);
+    customInput?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addCustom(); } });
+
+    endEarlyBtn?.addEventListener('click', async () => {
+        if (!confirm('End the Deep Work session now? The block lifts immediately.')) return;
+        const r = await window.electronAPI.endDeepWork();
+        if (!r?.success) alert(`Could not end session: ${r?.error || 'unknown'}`);
+        await reloadDashboardFromMain('deep-work-ended-early');
+    });
+}
+
+>>>>>>> Stashed changes
 // --- Commitment Modal Logic ---
 function openCommitmentModal() {
     commitmentInput.value = '';

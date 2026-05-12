@@ -224,6 +224,64 @@ class DataManager {
             this.store.set(`usage.${today}`, {});
         }
 
+<<<<<<< Updated upstream
+=======
+        // When true (default): unblocked sites are automatically re-blocked at the local calendar rollover.
+        if (!this.store.has('autoReblockUnblockedSitesOnNewDay')) {
+            this.store.set('autoReblockUnblockedSitesOnNewDay', true);
+        }
+
+        // Last calendar day we've applied "new day" policy (baseline for midnight detection).
+        if (!this.store.has('calendarRollBaselineDay')) {
+            this.store.set('calendarRollBaselineDay', today);
+        }
+
+        if (!this.store.has('hostsTamperEvents')) {
+            this.store.set('hostsTamperEvents', []);
+        }
+
+        // Local-HTML digest settings. Default target is the user's Google Drive root
+        // — created lazily on first generate. Schedule is opportunistic, not exact:
+        // weekly runs the first time the app sees a Monday >= 09:00 with no prior run that week;
+        // monthly runs the first time it sees day-of-month 1 >= 09:00 with no prior run that month.
+        if (!this.store.has('reportSettings')) {
+            this.store.set('reportSettings', {
+                targetFolder: 'G:\\My Drive\\Social Blocker\\reports',
+                weeklyEnabled: true,
+                monthlyEnabled: true,
+                autoOpenOnGenerate: true,
+                lastWeeklyGeneratedAt: null,
+                lastMonthlyGeneratedAt: null
+            });
+        }
+
+        // HUD widget settings. visible=false default — opt-in via tray menu (per Recommendation #2).
+        // autoHideFullscreen=true to disappear during video/games. clickThrough=false so
+        // double-click opens the dashboard.
+        if (!this.store.has('hudConfig')) {
+            this.store.set('hudConfig', {
+                visible: false,
+                autoHideFullscreen: true,
+                clickThrough: false
+            });
+        }
+
+        // Deep Work editor configuration. selectedSites references siteSettings keys
+        // (Instagram, Facebook, etc.) plus the special name 'Messenger' which resolves
+        // to a hardcoded domain set via getDeepWorkSpecialSites(). customDomains is a
+        // free-form list users add via chip input in the dashboard.
+        if (!this.store.has('deepWorkConfig')) {
+            this.store.set('deepWorkConfig', {
+                selectedSites: ['Instagram', 'Facebook', 'Twitter/X', 'Reddit', 'YouTube', 'Messenger'],
+                customDomains: []
+            });
+        }
+
+        // Mirrors which sites should be blocking all their domains according to last successful hosts apply / policy.
+        if (!this.store.has('appliedBlockedBySite')) {
+            this.syncAppliedBlockedFromDomains(this.getBlockedDomains());
+        }
+>>>>>>> Stashed changes
 
         // Manual "Lock Today" per-site discipline control (strict: no unlock until tomorrow)
         if (!this.store.has('manualLocks')) {
@@ -600,9 +658,123 @@ class DataManager {
             siteSettings: this.getSiteSettings(),
             blockedDomains: this.getBlockedDomains(),
             usageData: this.getTodayUsage(),
+<<<<<<< Updated upstream
             deepWork: this.getDeepWork(),
             manualLocks: this.getManualLocks()
+=======
+            deepWork: this.normalizeDeepWork(this.getDeepWork()),
+            rawDeepWork: this.getDeepWork(),
+            manualLocks: this.getManualLocks(),
+            autoReblockUnblockedSitesOnNewDay: this.store.get('autoReblockUnblockedSitesOnNewDay', true),
+            reportSettings: this.getReportSettings(),
+            deepWorkConfig: this.getDeepWorkConfig(),
+            deepWorkSpecialSites: this.getDeepWorkSpecialSites(),
+            ...hostsIntegrityOverlay
+>>>>>>> Stashed changes
         };
+    }
+
+    // ---------------- HUD widget configuration ----------------
+    getHudConfig() {
+        const defaults = { visible: false, autoHideFullscreen: true, clickThrough: false };
+        const stored = this.store.get('hudConfig', defaults) || {};
+        return { ...defaults, ...stored };
+    }
+
+    setHudConfig(partial) {
+        const next = { ...this.getHudConfig(), ...(partial || {}) };
+        this.store.set('hudConfig', next);
+        return next;
+    }
+
+    // ---------------- Deep Work editor configuration ----------------
+
+    /**
+     * Pseudo-sites available in the Deep Work editor that are NOT in the normal
+     * tracker site list (because they're not browser-based or not configurable).
+     * Add new entries here to make them selectable in the editor.
+     */
+    getDeepWorkSpecialSites() {
+        return {
+            Messenger: {
+                domains: ['web.whatsapp.com', 'messenger.com', 'www.messenger.com']
+            }
+        };
+    }
+
+    getDeepWorkConfig() {
+        const defaults = {
+            selectedSites: ['Instagram', 'Facebook', 'Twitter/X', 'Reddit', 'YouTube', 'Messenger'],
+            customDomains: []
+        };
+        const stored = this.store.get('deepWorkConfig', defaults) || {};
+        return {
+            ...defaults,
+            ...stored,
+            selectedSites: Array.isArray(stored.selectedSites) ? stored.selectedSites : defaults.selectedSites,
+            customDomains: Array.isArray(stored.customDomains) ? stored.customDomains : []
+        };
+    }
+
+    setDeepWorkConfig(partial) {
+        const next = { ...this.getDeepWorkConfig(), ...(partial || {}) };
+        // Normalize custom domains (lowercase, trim, strip protocol/path, dedupe).
+        if (Array.isArray(next.customDomains)) {
+            const cleaned = next.customDomains
+                .map(d => String(d || '').trim().toLowerCase())
+                .map(d => d.replace(/^https?:\/\//, '').replace(/\/.*$/, ''))
+                .filter(d => d && /^[a-z0-9.-]+\.[a-z]{2,}$/.test(d));
+            next.customDomains = Array.from(new Set(cleaned));
+        }
+        if (Array.isArray(next.selectedSites)) {
+            next.selectedSites = Array.from(new Set(next.selectedSites.filter(Boolean)));
+        }
+        this.store.set('deepWorkConfig', next);
+        return next;
+    }
+
+    /**
+     * Compute the full set of domains to block when a Deep Work session is active.
+     * Combines: selected real-site domains (from siteSettings) + selected special sites
+     * (Messenger etc.) + user-added customDomains. Always lowercase, always deduped.
+     */
+    computeDeepWorkDomains() {
+        const config = this.getDeepWorkConfig();
+        const siteSettings = this.getSiteSettings();
+        const specials = this.getDeepWorkSpecialSites();
+        const out = new Set();
+        for (const name of config.selectedSites) {
+            if (specials[name] && Array.isArray(specials[name].domains)) {
+                specials[name].domains.forEach(d => out.add(String(d).toLowerCase()));
+            } else if (siteSettings[name] && Array.isArray(siteSettings[name].domains)) {
+                siteSettings[name].domains.forEach(d => out.add(String(d).toLowerCase()));
+            }
+        }
+        for (const d of config.customDomains) {
+            const v = String(d || '').trim().toLowerCase();
+            if (v) out.add(v);
+        }
+        return Array.from(out);
+    }
+
+    // ---------------- Report (digest) settings ----------------
+    getReportSettings() {
+        const defaults = {
+            targetFolder: 'G:\\My Drive\\Social Blocker\\reports',
+            weeklyEnabled: true,
+            monthlyEnabled: true,
+            autoOpenOnGenerate: true,
+            lastWeeklyGeneratedAt: null,
+            lastMonthlyGeneratedAt: null
+        };
+        const stored = this.store.get('reportSettings', defaults) || {};
+        return { ...defaults, ...stored };
+    }
+
+    setReportSettings(partial) {
+        const next = { ...this.getReportSettings(), ...(partial || {}) };
+        this.store.set('reportSettings', next);
+        return next;
     }
 }
 

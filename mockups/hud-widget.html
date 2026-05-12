@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<!--
+HUD MOCKUP
+This file previews the live HUD widget at its real proposed pixel dimensions (260x160).
+In production this becomes its own always-on-top BrowserWindow anchored bottom-right above
+the Windows taskbar. The wrapper below simulates a desktop with the HUD floating in place.
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>HUD Widget Mockup</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        .progress-bar { transition: width 0.6s ease; }
+        .desktop-bg {
+            background-image:
+                linear-gradient(135deg, rgba(40,50,80,0.95), rgba(20,25,40,0.95)),
+                repeating-linear-gradient(0deg, transparent, transparent 40px, rgba(255,255,255,0.02) 40px, rgba(255,255,255,0.02) 41px);
+        }
+    </style>
+</head>
+<body class="bg-gray-200 text-white">
+
+    <div class="max-w-6xl mx-auto p-6">
+        <header class="mb-4 text-gray-800">
+            <h1 class="text-2xl font-bold">HUD Widget Preview</h1>
+            <p class="text-sm">Real dimensions: 260 &times; 160 px. Anchored bottom-right, above Windows taskbar. Compact variant.</p>
+        </header>
+
+        <!-- Simulated desktop with HUD in the bottom-right -->
+        <div class="desktop-bg rounded-lg shadow-2xl border border-gray-700 relative" style="height: 600px; overflow: hidden;">
+            <div class="absolute inset-0 flex items-center justify-center text-gray-500 text-sm select-none">
+                (Your desktop wallpaper / open apps appear here)
+            </div>
+
+            <!-- Simulated Windows taskbar -->
+            <div class="absolute bottom-0 left-0 right-0 bg-black/60 backdrop-blur h-12 flex items-center justify-center gap-3 border-t border-white/10">
+                <div class="w-8 h-8 rounded bg-blue-600/80"></div>
+                <div class="w-8 h-8 rounded bg-orange-500/80"></div>
+                <div class="w-8 h-8 rounded bg-green-600/80"></div>
+                <div class="w-8 h-8 rounded bg-purple-600/80"></div>
+                <div class="absolute right-4 text-xs text-white/70">4:59 PM</div>
+            </div>
+
+            <!-- The actual HUD widget (real pixel dimensions) -->
+            <div class="absolute bg-gray-900/95 backdrop-blur-md border border-cyan-500/30 rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.6)]"
+                 style="width: 260px; bottom: 64px; right: 16px;">
+                <!-- Header -->
+                <div class="flex items-center justify-between px-3 py-2 border-b border-gray-700/60">
+                    <div class="flex items-center gap-2">
+                        <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+                        <span class="text-xs font-semibold text-gray-200">FocusGuard</span>
+                    </div>
+                    <span class="text-[10px] text-gray-400">23m today</span>
+                </div>
+
+                <!-- Per-site bars -->
+                <div class="px-3 py-2 space-y-1.5">
+                    <!-- Instagram: over limit -->
+                    <div class="flex items-center gap-2 text-[11px]">
+                        <span class="w-14 text-gray-300 shrink-0">Instagram</span>
+                        <div class="flex-1 h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                            <div class="progress-bar h-full bg-red-500" style="width: 100%"></div>
+                        </div>
+                        <span class="w-12 text-right text-red-400 font-mono">62/60</span>
+                    </div>
+                    <!-- Reddit: warning -->
+                    <div class="flex items-center gap-2 text-[11px]">
+                        <span class="w-14 text-gray-300 shrink-0">Reddit</span>
+                        <div class="flex-1 h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                            <div class="progress-bar h-full bg-amber-500" style="width: 80%"></div>
+                        </div>
+                        <span class="w-12 text-right text-amber-300 font-mono">48/60</span>
+                    </div>
+                    <!-- YouTube: ok -->
+                    <div class="flex items-center gap-2 text-[11px]">
+                        <span class="w-14 text-gray-300 shrink-0">YouTube</span>
+                        <div class="flex-1 h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                            <div class="progress-bar h-full bg-cyan-500" style="width: 35%"></div>
+                        </div>
+                        <span class="w-12 text-right text-gray-300 font-mono">21/60</span>
+                    </div>
+                    <!-- Twitter/X: ok -->
+                    <div class="flex items-center gap-2 text-[11px]">
+                        <span class="w-14 text-gray-300 shrink-0">Twitter/X</span>
+                        <div class="flex-1 h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                            <div class="progress-bar h-full bg-cyan-500" style="width: 8%"></div>
+                        </div>
+                        <span class="w-12 text-right text-gray-300 font-mono">5/60</span>
+                    </div>
+                    <!-- Facebook: zero -->
+                    <div class="flex items-center gap-2 text-[11px]">
+                        <span class="w-14 text-gray-300 shrink-0">Facebook</span>
+                        <div class="flex-1 h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                            <div class="progress-bar h-full bg-cyan-500" style="width: 0%"></div>
+                        </div>
+                        <span class="w-12 text-right text-gray-500 font-mono">0/60</span>
+                    </div>
+                </div>
+
+                <!-- Footer (only when deep work active) -->
+                <div class="px-3 py-1.5 bg-cyan-900/40 border-t border-cyan-700/40 text-[10px] text-cyan-200 flex items-center justify-between">
+                    <span>● Deep Work</span>
+                    <span class="font-mono">1h 14m left</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Notes for review -->
+        <div class="mt-6 bg-gray-800 text-gray-200 rounded-lg p-5 space-y-3 text-sm">
+            <h2 class="text-lg font-semibold text-cyan-400">Behavior summary</h2>
+            <ul class="list-disc list-inside space-y-1 ml-2">
+                <li><strong>Position:</strong> bottom-right, 16 px above taskbar, 16 px from screen edge. Draggable later via tray-menu &ldquo;Move HUD&rdquo;.</li>
+                <li><strong>Always-on-top:</strong> yes &mdash; but stays visible only when non-fullscreen apps are focused. Auto-hides during fullscreen video/games.</li>
+                <li><strong>Click-through:</strong> OFF by default. Mouse clicks on the HUD do HUD things (right-click for menu, double-click opens dashboard).</li>
+                <li><strong>Refresh cadence:</strong> every 5 seconds (same as the tracker tick).</li>
+                <li><strong>Bar colors:</strong> cyan under limit, amber at 75&ndash;99%, red at &ge;100%.</li>
+                <li><strong>Deep-work footer:</strong> only shown when a session is active.</li>
+                <li><strong>Tray menu adds:</strong> &ldquo;Show HUD&rdquo; / &ldquo;Hide HUD&rdquo; toggle, persisted across launches.</li>
+            </ul>
+
+            <h2 class="text-lg font-semibold text-cyan-400 pt-3">Questions to answer</h2>
+            <ol class="list-decimal list-inside space-y-1 ml-2 text-gray-300">
+                <li>Show all configured sites or only sites with usage today (e.g. hide Facebook when minutes = 0)?</li>
+                <li>Show the HUD by default on first launch, or hidden until you enable it from the tray menu?</li>
+                <li>Allow resizing, or fixed at 260&nbsp;&times;&nbsp;160?</li>
+            </ol>
+        </div>
+    </div>
+</body>
+</html>
