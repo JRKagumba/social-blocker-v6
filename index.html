@@ -14,6 +14,25 @@
         <span id="deep-work-timer"></span>
     </div>
 
+    <div id="hosts-integrity-banner" class="hidden bg-amber-700 text-white text-center p-2 text-sm font-semibold fixed top-10 left-0 right-0 z-[49] shadow-lg flex flex-wrap items-center justify-center gap-3">
+        <span id="hosts-integrity-text">Hosts file does not match Social Blocker settings — blocking may be bypassed.</span>
+        <button type="button" id="repair-hosts-btn" class="bg-white text-amber-900 font-bold py-1 px-4 rounded hover:bg-amber-50">Repair hosts now</button>
+    </div>
+
+    <!-- Pending Changes Banner -->
+    <div id="pending-changes-banner" class="hidden bg-yellow-600 text-white text-center p-3 font-bold text-lg fixed top-0 left-0 right-0 z-40 shadow-lg">
+        <div class="flex items-center justify-center space-x-4">
+            <svg class="w-6 h-6 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+            <span id="pending-changes-text">You have unsaved changes</span>
+            <button id="apply-changes-btn" class="bg-white text-yellow-700 font-bold py-2 px-6 rounded-lg hover:bg-yellow-50 transition-colors shadow-lg ml-4">
+                Save & Apply Changes
+            </button>
+            <button id="revert-changes-btn" class="bg-yellow-700 text-white font-bold py-2 px-6 rounded-lg hover:bg-yellow-800 transition-colors border-2 border-white">
+                Revert Changes
+            </button>
+        </div>
+    </div>
+
     <div class="container mx-auto p-12 max-w-5xl min-h-screen pt-20">
         <header class="text-center mb-12">
             <h1 class="text-5xl font-bold text-cyan-400 mb-4">Social Blocker v6</h1>
@@ -35,14 +54,30 @@
             <!-- Dashboard Content -->
             <div id="content-dashboard" class="tab-content">
                 <!-- Master Status, Website Controls, etc. -->
-                <div class="bg-gray-800/80 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-700/50 p-8 mb-10 flex items-center justify-between">
-                     <div class="flex items-center">
-                         <svg class="w-8 h-8 text-cyan-400 mr-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
-                        <span class="text-xl font-semibold">Master Blocker Status</span>
+                <div class="bg-gray-800/80 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-700/50 p-8 mb-10">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center">
+                            <svg class="w-8 h-8 text-cyan-400 mr-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+                            <span class="text-xl font-semibold">Master Blocker Status</span>
+                        </div>
+                        <div class="flex items-center">
+                            <span id="status-indicator" class="mr-4 text-sm font-semibold opacity-0 transition-opacity">(Saving...)</span>
+                            <span id="blocker-status-text" class="mr-4 text-lg font-bold"></span>
+                        </div>
                     </div>
-                     <div class="flex items-center">
-                        <span id="status-indicator" class="mr-4 text-sm font-semibold opacity-0 transition-opacity">(Saving...)</span>
-                        <span id="blocker-status-text" class="mr-4 text-lg font-bold"></span>
+                    <!-- Pending changes preview -->
+                    <div id="pending-changes-preview" class="hidden mt-4 pt-4 border-t border-gray-700">
+                        <p class="text-sm text-yellow-400 mb-2 font-semibold">Pending Changes:</p>
+                        <div class="flex flex-wrap gap-2">
+                            <div id="will-block-list" class="hidden">
+                                <span class="text-xs text-red-400">Will block: </span>
+                                <span id="will-block-sites" class="text-xs text-red-300"></span>
+                            </div>
+                            <div id="will-unblock-list" class="hidden">
+                                <span class="text-xs text-green-400">Will unblock: </span>
+                                <span id="will-unblock-sites" class="text-xs text-green-300"></span>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -154,7 +189,7 @@
         <div class="bg-gray-800/95 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-700/50 p-10 max-w-lg w-full transform transition-all scale-95 opacity-0" id="modal-content">
             <h2 class="text-3xl font-bold mb-6 text-yellow-400">Commitment Required</h2>
             <p class="text-gray-300 mb-6 text-lg">To increase this time limit, you must demonstrate your commitment to focus. Please type the following paragraph exactly as it appears. The backspace key is disabled.</p>
-            <p id="commitment-paragraph" class="text-gray-400 italic bg-gray-900/80 p-6 rounded-lg mb-6 select-all border border-gray-700"></p>
+            <p id="commitment-paragraph" class="text-gray-400 italic bg-gray-900/80 p-6 rounded-lg mb-6 border border-gray-700 select-none" style="user-select: none; -webkit-user-select: none;"></p>
             <textarea id="commitment-input" rows="6" class="w-full bg-gray-900/80 text-white rounded-lg p-4 focus:outline-none focus:ring-2 focus:ring-cyan-500 border border-gray-700"></textarea>
             <div class="flex justify-end space-x-6 mt-8">
                 <button id="cancel-commitment-btn" class="px-8 py-3 bg-gray-600 hover:bg-gray-700 rounded-lg transition-colors shadow-lg">Cancel</button>

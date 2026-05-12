@@ -38,6 +38,9 @@ const commitmentParagraph = document.getElementById('commitment-paragraph');
 const commitmentInput = document.getElementById('commitment-input');
 const cancelCommitmentBtn = document.getElementById('cancel-commitment-btn');
 const confirmCommitmentBtn = document.getElementById('confirm-commitment-btn');
+const hostsIntegrityBanner = document.getElementById('hosts-integrity-banner');
+const hostsIntegrityText = document.getElementById('hosts-integrity-text');
+const repairHostsBtn = document.getElementById('repair-hosts-btn');
 
 // --- State Variables ---
 let siteSettings = {};
@@ -49,6 +52,64 @@ let savedToggleStates = {}; // The state saved to disk (current reality)
 let pendingToggleStates = {}; // The state shown in UI (pending changes)
 let hasPendingChanges = false;
 
+
+function getLocalISODate() {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+function normalizeCommitmentText(s) {
+    return String(s ?? '').replace(/\r\n/g, '\n').replace(/\s+$/gm, '').trimEnd();
+}
+
+function syncBannerStackPlacement() {
+    if (!deepWorkBanner || !hostsIntegrityBanner || !pendingChangesBanner) return;
+    const deepOn = !deepWorkBanner.classList.contains('hidden');
+    const hostsOn = !hostsIntegrityBanner.classList.contains('hidden');
+
+    hostsIntegrityBanner.style.top = deepOn ? '42px' : '0';
+
+    let pendingTop = 0;
+    if (deepOn) pendingTop += 42;
+    if (hostsOn) pendingTop += 44;
+    pendingChangesBanner.style.top = `${pendingTop}px`;
+}
+
+async function reloadDashboardFromMain(reason = '') {
+    const data = await window.electronAPI.getInitialData();
+    if (!data.success) return;
+    siteSettings = data.siteSettings;
+    renderSiteList(data.blockedDomains, data.usageData, data.manualLocks, data.today);
+    updateMasterStatusText();
+    updateDeepWorkUI(data.deepWork);
+    updateHostsIntegrityBanner(data.hostsIntegrity);
+    await renderHistoryChart();
+    if (reason) console.log('Renderer: dashboard reloaded —', reason);
+}
+
+function updateHostsIntegrityBanner(integrity) {
+    if (!hostsIntegrityBanner || !hostsIntegrityText) return;
+    if (!integrity || integrity.ok) {
+        hostsIntegrityBanner.classList.add('hidden');
+        syncBannerStackPlacement();
+        return;
+    }
+    const miss = (integrity.unexpectedMissing && integrity.unexpectedMissing.length)
+        ? ` Missing: ${integrity.unexpectedMissing.slice(0, 6).join(', ')}${integrity.unexpectedMissing.length > 6 ? '…' : ''}.`
+        : '';
+    const extra = (integrity.unexpectedExtra && integrity.unexpectedExtra.length)
+        ? ` Unexpected: ${integrity.unexpectedExtra.slice(0, 4).join(', ')}${integrity.unexpectedExtra.length > 4 ? '…' : ''}.`
+        : '';
+    hostsIntegrityText.textContent =
+        `Hosts file out of sync with the app (was it edited outside Social Blocker?).${miss}${extra} Click Repair or Save & Apply.`;
+    hostsIntegrityBanner.classList.remove('hidden');
+    syncBannerStackPlacement();
+}
+
+
 // --- Initialization ---
 window.addEventListener('DOMContentLoaded', async () => {
     const initialData = await window.electronAPI.getInitialData();
@@ -58,6 +119,8 @@ window.addEventListener('DOMContentLoaded', async () => {
         updateMasterStatusText();
         updateDeepWorkUI(initialData.deepWork);
         await renderHistoryChart();
+        updateHostsIntegrityBanner(initialData.hostsIntegrity);
+        syncBannerStackPlacement();
     }
     setupEventListeners();
     showTab('dashboard');
@@ -66,6 +129,8 @@ window.addEventListener('DOMContentLoaded', async () => {
 // --- Real-time Listeners ---
 window.electronAPI.onUsageUpdate(handleUsageUpdate);
 window.electronAPI.onDeepWorkUpdate(updateDeepWorkUI);
+window.electronAPI.onHostsIntegrityUpdate((payload) => updateHostsIntegrityBanner(payload));
+window.electronAPI.onCalendarDayChanged(() => reloadDashboardFromMain('calendar-day-changed'));
 
 // --- UI Rendering & State Updates ---
 function renderSiteList(blockedDomains, usageData, manualLocks = {}, today = null) {
@@ -482,6 +547,7 @@ function updatePendingChangesBanner() {
         pendingChangesBanner.classList.add('hidden');
         pendingChangesPreview.classList.add('hidden');
     }
+    syncBannerStackPlacement();
 }
 
 function handleToggleChange(siteName) {
@@ -562,7 +628,7 @@ function setupEventListeners() {
         }
     });
     
-    nuclearOptionBtn.addEventListener('click', () => { 
+    nuclearOptionBtn.addEventListener('click', async () => {
         document.querySelectorAll('.individual-toggle').forEach(t => {
             if (!t.disabled) {
                 t.checked = true;
@@ -570,54 +636,54 @@ function setupEventListeners() {
             }
         });
         updatePendingChangesBanner();
+        await applyChanges();
     });
-            deepWorkBtn.addEventListener('click', () => { 
-                const hours = parseInt(deepWorkHoursInput.value, 10) || 0;
-                const minutes = parseInt(deepWorkMinutesInput.value, 10) || 0;
-                const totalMinutes = (hours * 60) + minutes;
-                
-                // Button should be disabled if invalid, but double-check
-                if (totalMinutes === 0 || totalMinutes > 480) {
-                    return;
-                }
-                
-                const totalSeconds = totalMinutes * 60;
-                window.electronAPI.startDeepWork(totalSeconds); 
-            });
-            
-            // Validation function for Deep Work inputs
-            function validateDeepWorkInputs() {
-                const hours = parseInt(deepWorkHoursInput.value, 10) || 0;
-                const minutes = parseInt(deepWorkMinutesInput.value, 10) || 0;
-                const totalMinutes = (hours * 60) + minutes;
-                
-                // Disable button if total is 0 or exceeds 8 hours (480 minutes)
-                deepWorkBtn.disabled = (totalMinutes === 0 || totalMinutes > 480);
-            }
-            
-            // Live validation on input changes
-            deepWorkHoursInput.addEventListener('input', validateDeepWorkInputs);
-            deepWorkMinutesInput.addEventListener('input', validateDeepWorkInputs);
-            
-            // Select all text when focused (for easy editing)
-            deepWorkHoursInput.addEventListener('focus', () => {
-                deepWorkHoursInput.select();
-            });
-            
-            deepWorkHoursInput.addEventListener('click', () => {
-                deepWorkHoursInput.select();
-            });
-            
-            deepWorkMinutesInput.addEventListener('focus', () => {
-                deepWorkMinutesInput.select();
-            });
-            
-            deepWorkMinutesInput.addEventListener('click', () => {
-                deepWorkMinutesInput.select();
-            });
-            
-            // Run validation on page load
-            validateDeepWorkInputs();
+
+    deepWorkBtn.addEventListener('click', async () => {
+        const hours = parseInt(deepWorkHoursInput.value, 10) || 0;
+        const minutes = parseInt(deepWorkMinutesInput.value, 10) || 0;
+        const totalMinutes = (hours * 60) + minutes;
+
+        if (totalMinutes === 0 || totalMinutes > 480) {
+            return;
+        }
+
+        const totalSeconds = totalMinutes * 60;
+        await window.electronAPI.startDeepWork(totalSeconds);
+    });
+
+    function validateDeepWorkInputs() {
+        if (!deepWorkBanner.classList.contains('hidden')) {
+            deepWorkBtn.disabled = true;
+            return;
+        }
+        const hours = parseInt(deepWorkHoursInput.value, 10) || 0;
+        const minutes = parseInt(deepWorkMinutesInput.value, 10) || 0;
+        const totalMinutes = (hours * 60) + minutes;
+
+        deepWorkBtn.disabled = (totalMinutes === 0 || totalMinutes > 480);
+    }
+
+    deepWorkHoursInput.addEventListener('input', validateDeepWorkInputs);
+    deepWorkMinutesInput.addEventListener('input', validateDeepWorkInputs);
+
+    deepWorkHoursInput.addEventListener('focus', () => {
+        deepWorkHoursInput.select();
+    });
+
+    deepWorkHoursInput.addEventListener('click', () => {
+        deepWorkHoursInput.select();
+    });
+
+    deepWorkMinutesInput.addEventListener('focus', () => {
+        deepWorkMinutesInput.select();
+    });
+
+    deepWorkMinutesInput.addEventListener('click', () => {
+        deepWorkMinutesInput.select();
+    });
+
+    validateDeepWorkInputs();
     tabs.dashboard.addEventListener('click', () => showTab('dashboard'));
     tabs.history.addEventListener('click', async () => { 
         await renderHistoryChart();
@@ -634,9 +700,20 @@ function setupEventListeners() {
     cancelCommitmentBtn.addEventListener('click', closeCommitmentModal);
     confirmCommitmentBtn.addEventListener('click', confirmCommitment);
     commitmentInput.addEventListener('input', validateCommitmentInput);
-    commitmentInput.addEventListener('keydown', (e) => { 
-        if (e.key === 'Backspace') e.preventDefault(); 
+    commitmentInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Backspace') e.preventDefault();
     });
+    commitmentInput.addEventListener('paste', (e) => e.preventDefault());
+    commitmentInput.addEventListener('drop', (e) => e.preventDefault());
+    commitmentInput.addEventListener('dragover', (e) => e.preventDefault());
+    commitmentInput.addEventListener('contextmenu', (e) => e.preventDefault());
+
+    if (repairHostsBtn) {
+        repairHostsBtn.addEventListener('click', async () => {
+            const res = await window.electronAPI.repairHostsNow();
+            if (res.success) await reloadDashboardFromMain('repair-hosts');
+        });
+    }
 }
 
 // --- Handlers & Core Logic ---
@@ -714,6 +791,8 @@ async function handleLimitChange(input) {
 async function applyChanges() {
     statusIndicator.classList.remove('opacity-0');
     statusIndicator.textContent = '(Requesting admin access...)';
+
+    let success = false;
     
     const sitesToBlock = [];
     document.querySelectorAll('.individual-toggle:checked').forEach(toggle => {
@@ -727,7 +806,20 @@ async function applyChanges() {
     try {
         const result = await window.electronAPI.updateHostsFile(sitesToBlock);
         if (result.success) {
+            success = true;
             statusIndicator.textContent = '(Success!)';
+
+            if (result.verified === false && result.verification) {
+                updateHostsIntegrityBanner({
+                    ok: false,
+                    unexpectedMissing: result.verification.unexpectedMissing || [],
+                    unexpectedExtra: result.verification.unexpectedExtra || [],
+                    sectionPresent: !!result.verification.sectionPresent
+                });
+            } else {
+                updateHostsIntegrityBanner({ ok: true });
+            }
+            syncBannerStackPlacement();
             
             // Update saved states to match what was just applied
             Object.keys(pendingToggleStates).forEach(siteName => {
@@ -756,42 +848,24 @@ async function applyChanges() {
         statusIndicator.classList.add('opacity-0');
         statusIndicator.textContent = '(Saving...)';
     }, 2000);
-}
-
-function updateMasterStatusText() {
-    const total = Object.keys(siteSettings).length;
-    const blockedCount = document.querySelectorAll('.individual-toggle:checked').length;
-    statusText.textContent = `${blockedCount} / ${total} SITES BLOCKED`;
-    statusText.className = 'mr-4 text-lg font-bold transition-colors';
-    if (blockedCount === 0) statusText.classList.add('text-green-500');
-    else if (blockedCount === total) statusText.classList.add('text-red-500');
-    else statusText.classList.add('text-yellow-500');
-}
-
-function showTab(tabName) {
-    Object.values(contents).forEach(c => c.classList.add('hidden'));
-    Object.values(tabs).forEach(t => t.classList.replace('tab-active', 'tab-inactive'));
-    contents[tabName].classList.remove('hidden');
-    tabs[tabName].classList.replace('tab-inactive', 'tab-active');
-}
-
-function updateDeepWorkUI(deepWork) {
-    if (deepWork && deepWork.isActive && deepWork.remaining > 0) {
-        deepWorkBanner.classList.remove('hidden');
-        const minutes = Math.floor(deepWork.remaining / 60000);
-        const seconds = Math.floor((deepWork.remaining % 60000) / 1000).toString().padStart(2, '0');
-        deepWorkTimer.textContent = `Deep Work session active. Time remaining: ${minutes}:${seconds}`;
-        deepWorkBtn.disabled = true;
-        deepWorkBtn.textContent = 'Session Active';
-    } else {
-        deepWorkBanner.classList.add('hidden');
-        deepWorkBtn.disabled = false;
-        deepWorkBtn.textContent = 'Start Deep Work';
-    }
+    return success;
 }
 
 async function lockSiteForToday(siteName) {
     try {
+        // Prevent accidental application of unrelated pending changes.
+        // If there are other sites with unsaved toggle changes, force the user
+        // to either apply or revert those before using "Lock today".
+        const otherPendingChanges = Object.keys(pendingToggleStates).some(name => {
+            if (name === siteName) return false;
+            return savedToggleStates[name] !== pendingToggleStates[name];
+        });
+
+        if (otherPendingChanges) {
+            alert('You have other unsaved toggle changes. Please Save & Apply or Revert those changes before locking a site for today.');
+            return;
+        }
+
         const toggle = blockedSitesList.querySelector(`.individual-toggle[data-site-name="${CSS.escape(siteName)}"]`);
         if (!toggle) return;
 
@@ -820,11 +894,55 @@ async function lockSiteForToday(siteName) {
         if (latest.success) {
             siteSettings = latest.siteSettings;
             renderSiteList(latest.blockedDomains, latest.usageData, latest.manualLocks, latest.today);
+            updateHostsIntegrityBanner(latest.hostsIntegrity);
+            syncBannerStackPlacement();
             updateMasterStatusText();
         }
     } catch (err) {
         console.error('Error locking site for today:', err);
     }
+}
+
+
+
+function updateMasterStatusText() {
+    const total = Object.keys(siteSettings).length;
+    const blockedCount = document.querySelectorAll('.individual-toggle:checked').length;
+    statusText.textContent = `${blockedCount} / ${total} SITES BLOCKED`;
+    statusText.className = 'mr-4 text-lg font-bold transition-colors';
+    if (blockedCount === 0) statusText.classList.add('text-green-500');
+    else if (blockedCount === total) statusText.classList.add('text-red-500');
+    else statusText.classList.add('text-yellow-500');
+}
+
+function showTab(tabName) {
+    Object.values(contents).forEach(c => c.classList.add('hidden'));
+    Object.values(tabs).forEach(t => t.classList.replace('tab-active', 'tab-inactive'));
+    contents[tabName].classList.remove('hidden');
+    tabs[tabName].classList.replace('tab-inactive', 'tab-active');
+}
+
+function updateDeepWorkUI(deepWork) {
+    const ms = (() => {
+        if (!deepWork) return 0;
+        if (typeof deepWork.remainingMs === 'number') return deepWork.remainingMs;
+        if (typeof deepWork.remaining === 'number') return deepWork.remaining;
+        return 0;
+    })();
+
+    if (deepWork && deepWork.isActive && ms > 0) {
+        deepWorkBanner.classList.remove('hidden');
+        const minutes = Math.floor(ms / 60000);
+        const seconds = Math.floor((ms % 60000) / 1000).toString().padStart(2, '0');
+        deepWorkTimer.textContent = `Deep Work session active. Time remaining: ${minutes}:${seconds}`;
+        deepWorkBtn.disabled = true;
+        deepWorkBtn.textContent = 'Session Active';
+    } else {
+        deepWorkBanner.classList.add('hidden');
+        deepWorkBtn.disabled = false;
+        deepWorkBtn.textContent = 'Start Deep Work';
+    }
+    syncBannerStackPlacement();
 }
 
 // --- Commitment Modal Logic ---
@@ -842,7 +960,8 @@ function closeCommitmentModal() {
 }
 
 function validateCommitmentInput() {
-    confirmCommitmentBtn.disabled = commitmentInput.value !== commitmentParagraph.textContent;
+    confirmCommitmentBtn.disabled =
+        normalizeCommitmentText(commitmentInput.value) !== normalizeCommitmentText(commitmentParagraph.textContent);
 }
 
 async function confirmCommitment() {
