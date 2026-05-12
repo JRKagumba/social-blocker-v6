@@ -1,12 +1,13 @@
 // usageTracker.js - Handles background usage tracking and monitoring
 
 class UsageTracker {
-    constructor(dataManager, hostsManager) {
+    constructor(dataManager, hostsManager, getDeepWorkExtras = () => []) {
         this.dataManager = dataManager;
         this.hostsManager = hostsManager;
+        this.getDeepWorkExtras = typeof getDeepWorkExtras === 'function' ? getDeepWorkExtras : () => [];
         this.activeWin = null;
         this.isRunning = false;
-        this.CHECK_INTERVAL = 5000; // 5 seconds
+        this.CHECK_INTERVAL = 2000; // 2 seconds — finer-grained sampling reduces undercounting from focus flicker
         
         // Debug mode properties
         this.debugMode = false;
@@ -67,20 +68,76 @@ class UsageTracker {
                 return;
             }
 
-            const windowTitle = windowInfo.title.toLowerCase();
-            const appName = windowInfo.owner?.name?.toLowerCase() || 'unknown';
-            console.log(`Usage Tracker: Active window - "${windowTitle}" (App: ${appName})`);
+            // Guard against null/undefined titles (it happens).
+            const windowTitleRaw = windowInfo.title || '';
+            const windowTitle = windowTitleRaw.toLowerCase();
+            const ownerName = (windowInfo.owner?.name || '').toLowerCase();
+            const ownerPath = (windowInfo.owner?.path || '').toLowerCase();
+            console.log(`Usage Tracker: Active window - "${windowTitle}" (Owner: ${ownerName})`);
+
+            // Permissive browser detection — active-win returns either the basename ("chrome.exe")
+            // or the file description ("Google Chrome") depending on Windows version + install type.
+            // Matching against BOTH owner.name and owner.path catches every observed variant.
+            const browserIdentifiers = ['chrome', 'msedge', 'edge', 'brave', 'firefox', 'opera', 'vivaldi'];
+            const isBrowser = browserIdentifiers.some(id =>
+                ownerName.includes(id) || ownerPath.includes(`\\${id}.exe`)
+            );
+            if (!isBrowser) {
+                console.log(`Usage Tracker: Skipping non-browser owner: "${ownerName}"`);
+                return;
+            }
             
             const allSiteSettings = this.dataManager.getSiteSettings();
             let usageUpdated = false;
 
+            const compilePatterns = (site) => {
+                if (!site || !Array.isArray(site.matchPatterns) || site.matchPatterns.length === 0) {
+                    return [];
+                }
+                const patterns = [];
+                for (const p of site.matchPatterns) {
+                    if (typeof p !== 'string' || !p.trim()) continue;
+                    try {
+                        patterns.push(new RegExp(p, 'i'));
+                    } catch (e) {
+                        console.log(`Usage Tracker: Invalid match pattern for ${site.name || 'site'}: "${p}"`, e.message);
+                    }
+                }
+                return patterns;
+            };
+
+            /**
+             * Twitter/X: never keyword-fallback-match — pasted titles can contain "... netflix.com ..." substring "x.com"
+             * matching would false-positive via includes(). Regex-only is intentional.
+             */
+            const keywordFallbackAllowed = site => site?.name !== 'Twitter/X';
+
+            const safeKeywordMatch = (site) => {
+                if (!keywordFallbackAllowed(site)) return null;
+                if (!site || !Array.isArray(site.keywords) || site.keywords.length === 0) return null;
+                for (const rawK of site.keywords) {
+                    if (typeof rawK !== 'string') continue;
+                    const k = rawK.trim().toLowerCase();
+                    if (!k) continue;
+                    // Safety: ignore overly-generic short tokens (the historic "x" issue).
+                    if (k.length <= 2 && !k.includes('.')) continue;
+                    if (windowTitle.includes(k)) return k;
+                }
+                return null;
+            };
+
             for (const siteName in allSiteSettings) {
                 try {
                     const site = allSiteSettings[siteName];
-                    console.log(`Usage Tracker: Checking site "${siteName}" with keywords:`, site.keywords);
-                    
-                    if (site && site.keywords && site.keywords.some(keyword => windowTitle.includes(keyword))) {
-                        console.log(`🎯 Usage Tracker: MATCH FOUND! Site: ${siteName}, Keyword matched in: "${windowTitle}"`);
+                    console.log(`Usage Tracker: Checking site "${siteName}"`);
+
+                    const patterns = compilePatterns(site);
+                    const patternMatched = patterns.find(re => re.test(windowTitle));
+                    const keywordMatched = patternMatched ? null : safeKeywordMatch(site);
+
+                    if (patternMatched || keywordMatched) {
+                        const why = patternMatched ? `pattern: ${patternMatched}` : `keyword: "${keywordMatched}"`;
+                        console.log(`🎯 Usage Tracker: MATCH FOUND! Site: ${siteName} (${why}) in: "${windowTitle}"`);
                         
                         // Get the full usage object first
                         const fullUsageObject = this.dataManager.getTodayUsage();
@@ -126,7 +183,24 @@ class UsageTracker {
                             if (newBlockedArray.length > this.dataManager.getBlockedDomains().length) {
                                 console.log(`Usage Tracker: Auto-blocking ${siteName} - updating hosts file`);
                                 this.dataManager.setBlockedDomains(newBlockedArray);
-                                await this.hostsManager.updateHostsFile(newBlockedArray);
+                                const extras = this.getDeepWorkExtras();
+                                if (typeof this.hostsManager.suppressWatchTemporarily === 'function') {
+                                    this.hostsManager.suppressWatchTemporarily(5000);
+                                }
+                                await this.hostsManager.updateHostsFile(newBlockedArray, extras);
+                                const expected = Array.from(new Set(
+                                    [...newBlockedArray, ...extras].map(d => String(d).toLowerCase())
+                                ));
+                                const v = this.hostsManager.verifyHostsSection(expected);
+                                if (global.mainWindow && global.mainWindow.webContents) {
+                                    global.mainWindow.webContents.send('hosts-integrity-update', {
+                                        ok: v.ok,
+                                        unexpectedMissing: v.unexpectedMissing,
+                                        unexpectedExtra: v.unexpectedExtra,
+                                        sectionPresent: v.sectionPresent,
+                                        expectedDomainCount: expected.length
+                                    });
+                                }
                                 console.log(`Usage Tracker: Successfully auto-blocked ${siteName}`);
                             } else {
                                 console.log(`Usage Tracker: ${siteName} already blocked, no action needed`);

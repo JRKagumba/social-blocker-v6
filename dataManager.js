@@ -46,17 +46,23 @@ class DataManager {
                     'x.com',
                     'www.x.com'
                 ],
-                // IMPORTANT: Do NOT include a bare "x" keyword. It will match almost anything.
-                keywords: ['twitter', 'twitter.com', 'x.com'],
+                // Never use substring "x.com" fallback — titles like "... netflix.com ..." falsely match x.com mid-string.
+                // Regex handles real X contexts; keywords are deliberately narrow.
+                keywords: ['twitter', 'twitter.com'],
                 matchPatterns: [
-                    // Old brand
                     '\\btwitter\\b',
                     '\\btwitter\\.com\\b',
-                    // Domain
-                    '\\bx\\.com\\b',
-                    // New site titles often look like: "Notifications / X" or "Home / X"
-                    '\\s/\\sx\\s',
-                    '\\s-\\sx\\s'
+                    // " / X" followed by a word boundary — covers single-tab Chrome ("/ X - Google Chrome")
+                    // AND Edge multi-tab ("/ X and 1 more page - Personal - Microsoft Edge").
+                    // Deliberately NOT \bx\.com\b — would false-positive on Reddit threads discussing x.com.
+                    '\\s/\\sx\\b',
+                    // "(12) Notifications / X ..." — multi-tab numeric prefix.
+                    '^\\(\\d+\\)\\s[^\\n]*\\s/\\sx\\b',
+                    // Post titles "Name on X: \"…\""
+                    '\\bon\\sx\\s*:',
+                    // Alternate separators used in SPA titles.
+                    '\\s-\\sx\\s*-\\s*',
+                    '\\s\\|\\sx\\s*\\|'
                 ],
                 limit: 60
             },
@@ -65,7 +71,13 @@ class DataManager {
                 // Subdomains matter for hosts-file blocking.
                 domains: ['reddit.com', 'www.reddit.com', 'old.reddit.com', 'new.reddit.com', 'np.reddit.com', 'redd.it'],
                 keywords: ['reddit', 'reddit.com', 'redd.it'],
-                matchPatterns: ['\\breddit\\b', '\\breddit\\.com\\b', '\\bredd\\.it\\b'],
+                matchPatterns: [
+                    '\\breddit\\b',
+                    '\\breddit\\.com\\b',
+                    '\\bredd\\.it\\b',
+                    // Modern Reddit titles omit the brand; subreddit slash is the giveaway.
+                    '\\br/[A-Za-z0-9_]+\\b'
+                ],
                 limit: 60
             },
             'LinkedIn': {
@@ -180,16 +192,26 @@ class DataManager {
 
                 // Ensure Twitter/X doesn't contain an "x" keyword from older experiments.
                 if (siteName === 'Twitter/X') {
-                    const mustHave = ['twitter', 'twitter.com', 'x.com'];
+                    const mustHave = ['twitter', 'twitter.com'];
                     const merged = Array.from(new Set([...(site.keywords || []), ...mustHave]));
                     const sanitizedMerged = this.sanitizeKeywords(siteName, merged);
                     if (JSON.stringify(sanitizedMerged) !== JSON.stringify(site.keywords)) {
                         site.keywords = sanitizedMerged;
                         needsUpdate = true;
                     }
+                    // Always migrate to safer title patterns — X title formats change frequently.
                     if (defaultSite?.matchPatterns && JSON.stringify(site.matchPatterns) !== JSON.stringify(defaultSite.matchPatterns)) {
-                        // overwrite with safer patterns
                         site.matchPatterns = defaultSite.matchPatterns;
+                        needsUpdate = true;
+                    }
+                }
+
+                if (siteName === 'Reddit' && defaultSite?.matchPatterns) {
+                    const patternSet = new Set(site.matchPatterns || []);
+                    defaultSite.matchPatterns.forEach(p => patternSet.add(p));
+                    const mergedPatterns = [...patternSet];
+                    if (mergedPatterns.length !== (site.matchPatterns || []).length) {
+                        site.matchPatterns = mergedPatterns;
                         needsUpdate = true;
                     }
                 }
@@ -224,12 +246,140 @@ class DataManager {
             this.store.set(`usage.${today}`, {});
         }
 
+        // When true (default): unblocked sites are automatically re-blocked at the local calendar rollover.
+        if (!this.store.has('autoReblockUnblockedSitesOnNewDay')) {
+            this.store.set('autoReblockUnblockedSitesOnNewDay', true);
+        }
+
+        // Last calendar day we've applied "new day" policy (baseline for midnight detection).
+        if (!this.store.has('calendarRollBaselineDay')) {
+            this.store.set('calendarRollBaselineDay', today);
+        }
+
+        if (!this.store.has('hostsTamperEvents')) {
+            this.store.set('hostsTamperEvents', []);
+        }
+
+        // Mirrors which sites should be blocking all their domains according to last successful hosts apply / policy.
+        if (!this.store.has('appliedBlockedBySite')) {
+            this.syncAppliedBlockedFromDomains(this.getBlockedDomains());
+        }
 
         // Manual "Lock Today" per-site discipline control (strict: no unlock until tomorrow)
         if (!this.store.has('manualLocks')) {
             this.store.set('manualLocks', {});
         }
         this.cleanupExpiredManualLocks();
+    }
+
+    normalizeDeepWork(raw) {
+        if (!raw || typeof raw.endTime !== 'number') return null;
+        const remainingMs = raw.endTime - Date.now();
+        if (remainingMs <= 0) return null;
+        return {
+            isActive: true,
+            endTime: raw.endTime,
+            remainingMs
+        };
+    }
+
+    inferAppliedBlockedBySite(domains) {
+        const blockedSet = new Set((domains || []).map(d => String(d).toLowerCase()));
+        const siteSettings = this.getSiteSettings();
+        const prefs = {};
+        for (const siteName in siteSettings) {
+            const s = siteSettings[siteName];
+            prefs[siteName] = Array.isArray(s.domains) && s.domains.length > 0
+                ? s.domains.every(d => blockedSet.has(String(d).toLowerCase()))
+                : false;
+        }
+        return prefs;
+    }
+
+    syncAppliedBlockedFromDomains(domains) {
+        const prefs = this.inferAppliedBlockedBySite(domains);
+        this.store.set('appliedBlockedBySite', prefs);
+        return prefs;
+    }
+
+    /** Rebuild flattened blocked domain list when per-site booleans flip. */
+    buildBlockedDomainsFromSitePreferenceMap(prefMap, siteSettings = null) {
+        const ss = siteSettings || this.getSiteSettings();
+        const out = [];
+        for (const siteName of Object.keys(ss)) {
+            if (prefMap[siteName]) {
+                const s = ss[siteName];
+                if (Array.isArray(s.domains)) out.push(...s.domains);
+            }
+        }
+        return Array.from(new Set(out.map(d => String(d).toLowerCase())));
+    }
+
+    appendHostsTamperEvent(entry) {
+        const log = [...this.store.get('hostsTamperEvents', [])];
+        log.push({
+            timestamp: new Date().toISOString(),
+            ...entry
+        });
+        while (log.length > 250) log.shift();
+        this.store.set('hostsTamperEvents', log);
+    }
+
+    /** Returns { rolled, baselineDay, prefsChanged, newDomainsJson } WITHOUT writing hosts — main process applies hosts. */
+    advanceCalendarRollIfNeeded() {
+        const today = this.getLocalISODate();
+        const baseline = this.store.get('calendarRollBaselineDay', today);
+
+        if (baseline === today) {
+            return { rolled: false, baselineDay: baseline, prefsChanged: false, newDomains: this.getBlockedDomains() };
+        }
+
+        this.cleanupExpiredManualLocks();
+
+        const siteSettings = this.getSiteSettings();
+        let applied = this.store.get('appliedBlockedBySite', null);
+        if (!applied || typeof applied !== 'object') {
+            applied = this.inferAppliedBlockedBySite(this.getBlockedDomains());
+        }
+
+        const autoReblock = this.store.get('autoReblockUnblockedSitesOnNewDay', true);
+
+        let prefsChanged = false;
+        if (autoReblock) {
+            for (const siteName of Object.keys(siteSettings)) {
+                if (applied[siteName] === false) {
+                    applied[siteName] = true;
+                    prefsChanged = true;
+                }
+            }
+        }
+
+        const rebuilt = this.buildBlockedDomainsFromSitePreferenceMap(applied, siteSettings);
+        const prev = this.getBlockedDomains();
+        const prevJson = JSON.stringify([...prev].map(d => String(d).toLowerCase()).sort());
+        const nextJson = JSON.stringify([...rebuilt].sort());
+
+        let domainsChanged = prevJson !== nextJson;
+
+        this.store.set('calendarRollBaselineDay', today);
+
+        if (domainsChanged || prefsChanged) {
+            this.store.set('blockedDomains', rebuilt);
+            this.store.set('appliedBlockedBySite', applied);
+            if (domainsChanged) {
+                console.log(`DataManager: Calendar roll ${baseline} -> ${today}. Recomputed blockedDomains (${prev.length}->${rebuilt.length}).`);
+            }
+        }
+
+        return {
+            rolled: true,
+            baselineDay: today,
+            prefsChanged,
+            domainsChanged,
+            prevDomainsCount: prev.length,
+            nextDomainsCount: rebuilt.length,
+            newDomains: this.getBlockedDomains()
+        };
     }
 
     // Clean up corrupted usage data
@@ -326,7 +476,9 @@ class DataManager {
     }
 
     setBlockedDomains(domains) {
-        this.store.set('blockedDomains', domains);
+        const list = Array.isArray(domains) ? [...domains] : [];
+        this.store.set('blockedDomains', list);
+        this.syncAppliedBlockedFromDomains(list);
     }
 
     // Usage Data
@@ -592,16 +744,19 @@ class DataManager {
         return { success: true, siteName, lockedForDate: today };
     }
 
-    // Initial Data for Renderer
-    getInitialData() {
+// Initial Data for Renderer
+    getInitialData(hostsIntegrityOverlay = {}) {
         return {
             success: true,
             today: this.getLocalISODate(),
             siteSettings: this.getSiteSettings(),
             blockedDomains: this.getBlockedDomains(),
             usageData: this.getTodayUsage(),
-            deepWork: this.getDeepWork(),
-            manualLocks: this.getManualLocks()
+            deepWork: this.normalizeDeepWork(this.getDeepWork()),
+            rawDeepWork: this.getDeepWork(),
+            manualLocks: this.getManualLocks(),
+            autoReblockUnblockedSitesOnNewDay: this.store.get('autoReblockUnblockedSitesOnNewDay', true),
+            ...hostsIntegrityOverlay
         };
     }
 }

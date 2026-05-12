@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   lockSiteForToday: (siteName) => ipcRenderer.invoke('lock-site-for-today', siteName),
   getManualLocks: () => ipcRenderer.invoke('get-manual-locks'),
 
+
   // --- Hosts File and Blocking ---
   updateHostsFile: (sitesToBlock) => ipcRenderer.invoke('update-hosts-file', sitesToBlock),
 
@@ -44,5 +45,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // --- Real-time Listeners (Main -> Renderer) ---
   onUsageUpdate: (callback) => ipcRenderer.on('usage-updated', (_event, value) => callback(value)),
   onDeepWorkUpdate: (callback) => ipcRenderer.on('deep-work-update', (_event, value) => callback(value)),
+  repairHostsNow: () => ipcRenderer.invoke('repair-hosts-now'),
+  onHostsIntegrityUpdate: (callback) =>
+    ipcRenderer.on('hosts-integrity-update', (_event, payload) => callback(payload)),
+  onCalendarDayChanged: (callback) =>
+    ipcRenderer.on('calendar-day-changed', (_event, payload) => callback(payload)),
 });
 
