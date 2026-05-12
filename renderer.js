@@ -49,8 +49,6 @@ let savedToggleStates = {}; // The state saved to disk (current reality)
 let pendingToggleStates = {}; // The state shown in UI (pending changes)
 let hasPendingChanges = false;
 
-<<<<<<< Updated upstream
-=======
 
 function getLocalISODate() {
     const now = new Date();
@@ -112,7 +110,6 @@ function updateHostsIntegrityBanner(integrity) {
 }
 
 
->>>>>>> Stashed changes
 // --- Initialization ---
 window.addEventListener('DOMContentLoaded', async () => {
     const initialData = await window.electronAPI.getInitialData();
@@ -932,38 +929,6 @@ async function applyChanges() {
     }, 2000);
 }
 
-function updateMasterStatusText() {
-    const total = Object.keys(siteSettings).length;
-    const blockedCount = document.querySelectorAll('.individual-toggle:checked').length;
-    statusText.textContent = `${blockedCount} / ${total} SITES BLOCKED`;
-    statusText.className = 'mr-4 text-lg font-bold transition-colors';
-    if (blockedCount === 0) statusText.classList.add('text-green-500');
-    else if (blockedCount === total) statusText.classList.add('text-red-500');
-    else statusText.classList.add('text-yellow-500');
-}
-
-function showTab(tabName) {
-    Object.values(contents).forEach(c => c.classList.add('hidden'));
-    Object.values(tabs).forEach(t => t.classList.replace('tab-active', 'tab-inactive'));
-    contents[tabName].classList.remove('hidden');
-    tabs[tabName].classList.replace('tab-inactive', 'tab-active');
-}
-
-function updateDeepWorkUI(deepWork) {
-    if (deepWork && deepWork.isActive && deepWork.remaining > 0) {
-        deepWorkBanner.classList.remove('hidden');
-        const minutes = Math.floor(deepWork.remaining / 60000);
-        const seconds = Math.floor((deepWork.remaining % 60000) / 1000).toString().padStart(2, '0');
-        deepWorkTimer.textContent = `Deep Work session active. Time remaining: ${minutes}:${seconds}`;
-        deepWorkBtn.disabled = true;
-        deepWorkBtn.textContent = 'Session Active';
-    } else {
-        deepWorkBanner.classList.add('hidden');
-        deepWorkBtn.disabled = false;
-        deepWorkBtn.textContent = 'Start Deep Work';
-    }
-}
-
 async function lockSiteForToday(siteName) {
     try {
         const toggle = blockedSitesList.querySelector(`.individual-toggle[data-site-name="${CSS.escape(siteName)}"]`);
@@ -1001,8 +966,6 @@ async function lockSiteForToday(siteName) {
     }
 }
 
-<<<<<<< Updated upstream
-=======
 
 
 function updateMasterStatusText() {
@@ -1231,7 +1194,6 @@ function initDeepWorkEditor(initialPayload) {
     });
 }
 
->>>>>>> Stashed changes
 // --- Commitment Modal Logic ---
 function openCommitmentModal() {
     commitmentInput.value = '';

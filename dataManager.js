@@ -224,8 +224,6 @@ class DataManager {
             this.store.set(`usage.${today}`, {});
         }
 
-<<<<<<< Updated upstream
-=======
         // When true (default): unblocked sites are automatically re-blocked at the local calendar rollover.
         if (!this.store.has('autoReblockUnblockedSitesOnNewDay')) {
             this.store.set('autoReblockUnblockedSitesOnNewDay', true);
@@ -281,7 +279,6 @@ class DataManager {
         if (!this.store.has('appliedBlockedBySite')) {
             this.syncAppliedBlockedFromDomains(this.getBlockedDomains());
         }
->>>>>>> Stashed changes
 
         // Manual "Lock Today" per-site discipline control (strict: no unlock until tomorrow)
         if (!this.store.has('manualLocks')) {
@@ -385,6 +382,9 @@ class DataManager {
 
     setBlockedDomains(domains) {
         this.store.set('blockedDomains', domains);
+        // Keep appliedBlockedBySite in sync with the canonical domain list so the
+        // calendar-roll logic and renderer never see contradictory state.
+        this.syncAppliedBlockedFromDomains(domains);
     }
 
     // Usage Data
@@ -651,17 +651,13 @@ class DataManager {
     }
 
     // Initial Data for Renderer
-    getInitialData() {
+    getInitialData(hostsIntegrityOverlay = {}) {
         return {
             success: true,
             today: this.getLocalISODate(),
             siteSettings: this.getSiteSettings(),
             blockedDomains: this.getBlockedDomains(),
             usageData: this.getTodayUsage(),
-<<<<<<< Updated upstream
-            deepWork: this.getDeepWork(),
-            manualLocks: this.getManualLocks()
-=======
             deepWork: this.normalizeDeepWork(this.getDeepWork()),
             rawDeepWork: this.getDeepWork(),
             manualLocks: this.getManualLocks(),
@@ -670,7 +666,6 @@ class DataManager {
             deepWorkConfig: this.getDeepWorkConfig(),
             deepWorkSpecialSites: this.getDeepWorkSpecialSites(),
             ...hostsIntegrityOverlay
->>>>>>> Stashed changes
         };
     }
 
@@ -775,6 +770,137 @@ class DataManager {
         const next = { ...this.getReportSettings(), ...(partial || {}) };
         this.store.set('reportSettings', next);
         return next;
+    }
+
+    // ---------------- Deep Work helpers (normalization) ----------------
+    /**
+     * Normalize raw stored deepWork data into a renderer-friendly shape, or null when
+     * no active session. Treats `endTime` in the past as "no session". Used by both
+     * main.js (policy decisions) and the IPC `get-initial-data` response so the renderer
+     * never has to do the math.
+     */
+    normalizeDeepWork(raw) {
+        if (!raw || typeof raw !== 'object') return null;
+        if (!raw.endTime) return null;
+        const end = new Date(raw.endTime).getTime();
+        if (!Number.isFinite(end)) return null;
+        const remainingMs = end - Date.now();
+        if (remainingMs <= 0) return null;
+        return { isActive: true, endTime: raw.endTime, remainingMs };
+    }
+
+    // ---------------- Calendar rollover ----------------
+    /**
+     * Re-apply "new day" policy if the local calendar day has advanced since the last
+     * baseline. Triggers:
+     *  - manual-lock cleanup (always)
+     *  - re-block of any sites that the user temporarily unblocked yesterday (when
+     *    `autoReblockUnblockedSitesOnNewDay` is true)
+     * Returns a summary object so main.js can decide whether to re-apply hosts.
+     */
+    advanceCalendarRollIfNeeded() {
+        const today = this.getLocalISODate();
+        const baseline = this.store.get('calendarRollBaselineDay', today);
+        if (baseline === today) {
+            return { rolled: false, prefsChanged: false, domainsChanged: false };
+        }
+
+        this.cleanupExpiredManualLocks();
+
+        const autoReblock = !!this.store.get('autoReblockUnblockedSitesOnNewDay', true);
+        let prefsChanged = false;
+        let domainsChanged = false;
+
+        if (autoReblock) {
+            const siteSettings = this.getSiteSettings();
+            const newPrefs = {};
+            for (const name of Object.keys(siteSettings)) {
+                newPrefs[name] = true;
+            }
+            const oldPrefs = this.store.get('appliedBlockedBySite', {}) || {};
+            const prefsKeysEqual =
+                Object.keys(oldPrefs).length === Object.keys(newPrefs).length &&
+                Object.keys(newPrefs).every(k => oldPrefs[k] === newPrefs[k]);
+            if (!prefsKeysEqual) {
+                this.store.set('appliedBlockedBySite', newPrefs);
+                prefsChanged = true;
+            }
+
+            const newDomains = this.buildBlockedDomainsFromSitePreferenceMap(newPrefs, siteSettings);
+            const oldDomains = this.getBlockedDomains();
+            const setsEqual =
+                newDomains.length === oldDomains.length &&
+                newDomains.every(d => oldDomains.includes(d));
+            if (!setsEqual) {
+                this.setBlockedDomains(newDomains);
+                domainsChanged = true;
+            }
+        }
+
+        this.store.set('calendarRollBaselineDay', today);
+        return { rolled: true, prefsChanged, domainsChanged };
+    }
+
+    // ---------------- Hosts tamper log ----------------
+    /**
+     * Appends a tamper event to the rolling log. Cap at 100 events so the store
+     * never balloons. Stored chronologically, oldest-first.
+     */
+    appendHostsTamperEvent(entry) {
+        const events = this.store.get('hostsTamperEvents', []) || [];
+        const stamped = { at: new Date().toISOString(), ...(entry || {}) };
+        events.push(stamped);
+        // Trim from the front so the most recent events are kept.
+        const MAX_EVENTS = 100;
+        const trimmed = events.length > MAX_EVENTS ? events.slice(events.length - MAX_EVENTS) : events;
+        this.store.set('hostsTamperEvents', trimmed);
+        return stamped;
+    }
+
+    // ---------------- Applied-block site-preference helpers ----------------
+    /**
+     * Pure: from a list of blocked domains, infer which sites are "fully blocked"
+     * (i.e. all of that site's domains are present). Used to derive `appliedBlockedBySite`
+     * after external/legacy state, or for sanity checks.
+     */
+    inferAppliedBlockedBySite(domains) {
+        const settings = this.getSiteSettings();
+        const lower = new Set((domains || []).map(d => String(d).toLowerCase()));
+        const out = {};
+        for (const [name, site] of Object.entries(settings)) {
+            if (!site.domains || site.domains.length === 0) {
+                out[name] = false;
+                continue;
+            }
+            out[name] = site.domains.every(d => lower.has(String(d).toLowerCase()));
+        }
+        return out;
+    }
+
+    /**
+     * Pure: rebuild the canonical blocked-domains list from a site-preference map
+     * (siteName -> boolean) and a fresh siteSettings snapshot.
+     */
+    buildBlockedDomainsFromSitePreferenceMap(prefMap, siteSettings) {
+        const out = new Set();
+        for (const [name, applied] of Object.entries(prefMap || {})) {
+            if (!applied) continue;
+            const site = siteSettings && siteSettings[name];
+            if (site && Array.isArray(site.domains)) {
+                site.domains.forEach(d => out.add(String(d).toLowerCase()));
+            }
+        }
+        return Array.from(out);
+    }
+
+    /**
+     * Write-through: persist the preference map inferred from the given domain list.
+     * Used at startup to backfill `appliedBlockedBySite` when it's missing.
+     */
+    syncAppliedBlockedFromDomains(domains) {
+        const inferred = this.inferAppliedBlockedBySite(domains);
+        this.store.set('appliedBlockedBySite', inferred);
+        return inferred;
     }
 }
 

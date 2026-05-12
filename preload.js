@@ -65,8 +65,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // --- Real-time Listeners (Main -> Renderer) ---
   onUsageUpdate: (callback) => ipcRenderer.on('usage-updated', (_event, value) => callback(value)),
   onDeepWorkUpdate: (callback) => ipcRenderer.on('deep-work-update', (_event, value) => callback(value)),
-<<<<<<< Updated upstream
-=======
   repairHostsNow: () => ipcRenderer.invoke('repair-hosts-now'),
   onHostsIntegrityUpdate: (callback) =>
     ipcRenderer.on('hosts-integrity-update', (_event, payload) => callback(payload)),
@@ -74,6 +72,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('calendar-day-changed', (_event, payload) => callback(payload)),
   onUpdateReady: (callback) =>
     ipcRenderer.on('update-ready', (_event, payload) => callback(payload)),
->>>>>>> Stashed changes
 });
 

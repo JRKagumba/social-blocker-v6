@@ -1,9 +1,6 @@
-<<<<<<< Updated upstream
-const { app, BrowserWindow, ipcMain, Tray, Menu, Notification } = require('electron');
-=======
 const { app, BrowserWindow, ipcMain, Tray, Menu, Notification, nativeImage, shell, screen } = require('electron');
->>>>>>> Stashed changes
 const path = require('path');
+const fs = require('fs');
 
 // --- Single Instance Lock ---
 const gotTheLock = app.requestSingleInstanceLock();
@@ -39,8 +36,6 @@ try {
 // Deep-work domains are now computed dynamically from dataManager.getDeepWorkConfig()
 // — see dataManager.computeDeepWorkDomains(). Editable via the Dashboard's Deep Work card.
 
-<<<<<<< Updated upstream
-=======
 // --- Deep work timers (must survive hot paths; cleared explicitly) ---
 let deepWorkTimeout = null;
 let deepWorkInterval = null;
@@ -51,7 +46,6 @@ let reportGenerator = null;
 let updaterCheckInterval = null;
 let updaterReadyPayload = null;
 
->>>>>>> Stashed changes
 // --- Commitment Paragraphs ---
 const commitmentParagraphs = [
     "Discipline is the bridge between goals and accomplishment. It is the refusal to be swayed by momentary comfort or fleeting distraction. By choosing this path, I am not punishing myself; I am investing in my future self. Every second I reclaim from mindless scrolling is a second I can dedicate to building the career, the skills, and the life I truly desire. This deliberate act of focus is a declaration that my long-term ambitions are more valuable than my short-term impulses.",
@@ -61,22 +55,18 @@ const commitmentParagraphs = [
 
 // --- Main Window & App State ---
 let mainWindow;
-<<<<<<< Updated upstream
-let deepWorkTimeout = null;
-=======
 let hudWindow = null;
 let hudFullscreenHidden = false;
->>>>>>> Stashed changes
 let dataManager;
 let hostsManager;
 let usageTracker;
 
 // --- Tray State ---
 let tray = null;
+let trayRefreshInterval = null;
+let trayResolvedIconPath = null;
 let isQuitting = false;
 
-<<<<<<< Updated upstream
-=======
 // Tiny 1x1 transparent PNG (canonical bytes) — used only when icon.ico can't be resolved,
 // so `new Tray(image)` doesn't throw and the user still gets a tray slot to right-click.
 // The icon will be invisible in this case (intentional — surfaces the underlying problem).
@@ -382,7 +372,6 @@ function startDigestScheduler() {
     }, 5 * 60 * 1000); // 5 minutes
 }
 
->>>>>>> Stashed changes
 function createWindow() {
     mainWindow = new BrowserWindow({
         width: 800,
@@ -408,36 +397,7 @@ function createWindow() {
     global.mainWindow = mainWindow;
 }
 
-<<<<<<< Updated upstream
-function createTray() {
-    // Create tray icon with proper path resolution for both dev and production
-    const iconPath = app.isPackaged 
-        ? path.join(process.resourcesPath, 'icon.ico')
-        : path.join(__dirname, 'icon.ico');
-    
-    console.log('=== TRAY DIAGNOSTIC ===');
-    console.log('App is packaged:', app.isPackaged);
-    console.log('Icon path:', iconPath);
-    console.log('Icon exists:', require('fs').existsSync(iconPath));
-    console.log('__dirname:', __dirname);
-    console.log('process.resourcesPath:', process.resourcesPath);
-    console.log('=======================');
-    
-    tray = new Tray(iconPath);
-    
-    // Set tooltip
-    tray.setToolTip('FocusGuard - Running');
-    
-    // Build context menu
-    const contextMenu = Menu.buildFromTemplate([
-        {
-            label: 'Show Dashboard',
-            click: () => {
-                if (mainWindow) {
-                    if (mainWindow.isMinimized()) mainWindow.restore();
-                    mainWindow.show();
-                    mainWindow.focus();
-=======
+
 // ---------------------------------------------------------------------------
 // HUD WIDGET — small frameless always-on-top window (Item D)
 // ---------------------------------------------------------------------------
@@ -575,53 +535,117 @@ function resolveTrayIcon() {
                 const img = nativeImage.createFromPath(candidate);
                 if (!img.isEmpty()) {
                     return { image: img, source: candidate, fallback: false };
->>>>>>> Stashed changes
                 }
             }
-        },
-        { type: 'separator' },
-        {
-            label: 'Status: Active',
-            enabled: false
-        },
-        { type: 'separator' },
-        {
-            label: 'Quit',
-            click: () => {
-                isQuitting = true;
-                app.quit();
-            }
+        } catch (e) {
+            console.warn(`Main: Tray icon candidate failed (${candidate}):`, e.message);
         }
-    ]);
-    
-    // Set the context menu
-    tray.setContextMenu(contextMenu);
-    
-    // Handle tray click (left-click to show window)
-    tray.on('click', () => {
+    }
+
+    console.warn('Main: No icon.ico found. Using embedded fallback (tray will still appear).');
+    const fallback = nativeImage.createFromBuffer(Buffer.from(FALLBACK_TRAY_PNG_BASE64, 'base64'));
+    return { image: fallback, source: '<embedded fallback>', fallback: true };
+}
+
+function formatMinutes(seconds) {
+    const m = Math.round((seconds || 0) / 60);
+    return `${m}m`;
+}
+
+function formatDurationFromMs(ms) {
+    const total = Math.max(0, Math.floor(ms / 1000));
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    if (h > 0) return `${h}h ${m}m`;
+    return `${m}m`;
+}
+
+function gatherTrayStats() {
+    if (!dataManager) return null;
+    const siteSettings = dataManager.getSiteSettings();
+    const usage = dataManager.getTodayUsage();
+    const blocked = new Set((dataManager.getBlockedDomains() || []).map(d => String(d).toLowerCase()));
+    const locks = dataManager.getManualLocks();
+    const unblocks = dataManager.getTodayUnblocks ? dataManager.getTodayUnblocks() : {};
+    const dw = dataManager.normalizeDeepWork(dataManager.getDeepWork());
+
+    const sites = Object.keys(siteSettings).map(name => {
+        const cfg = siteSettings[name];
+        const seconds = typeof usage[name] === 'number' ? usage[name] : 0;
+        const minutes = seconds / 60;
+        const isBlocked = Array.isArray(cfg.domains) && cfg.domains.length > 0
+            && cfg.domains.every(d => blocked.has(String(d).toLowerCase()));
+        return {
+            name,
+            seconds,
+            minutes,
+            limit: typeof cfg.limit === 'number' ? cfg.limit : 0,
+            isBlocked,
+            isLocked: !!locks[name],
+            isOver: cfg.limit > 0 && minutes >= cfg.limit
+        };
+    }).sort((a, b) => b.seconds - a.seconds);
+
+    const totalUnblocks = Object.values(unblocks).reduce((s, v) => s + (Number(v) || 0), 0);
+    const totalMinutes = sites.reduce((s, x) => s + x.minutes, 0);
+
+    return { sites, totalUnblocks, totalMinutes, deepWork: dw };
+}
+
+function buildTrayTooltip(stats) {
+    if (!stats) return 'FocusGuard';
+    const top = stats.sites
+        .filter(s => s.seconds > 0)
+        .slice(0, 3)
+        .map(s => `${s.name.split('/')[0]} ${formatMinutes(s.seconds)}`)
+        .join(' • ');
+    const head = `FocusGuard • ${Math.round(stats.totalMinutes)}m today`;
+    const dwSuffix = stats.deepWork ? ` • DW ${formatDurationFromMs(stats.deepWork.remainingMs)}` : '';
+    const unblocksSuffix = stats.totalUnblocks ? ` • ${stats.totalUnblocks} unblocks` : '';
+    const detail = top ? ` (${top})` : '';
+    // Windows 10+ tooltips are long-tolerant; Windows 7 capped at 127. Stay conservative.
+    let out = head + detail + dwSuffix + unblocksSuffix;
+    if (out.length > 127) out = out.slice(0, 124) + '…';
+    return out;
+}
+
+function buildTrayMenuTemplate(stats) {
+    const showDashboard = () => {
         if (mainWindow) {
             if (mainWindow.isMinimized()) mainWindow.restore();
             mainWindow.show();
             mainWindow.focus();
         }
-    });
-    
-    console.log('Main: Tray created successfully');
-    console.log('Main: Tray is destroyed?', tray.isDestroyed());
-    
-    // Show first-time notification
-    if (Notification.isSupported()) {
-        const notification = new Notification({
-            title: 'FocusGuard',
-            body: 'App is running in the background. Right-click the tray icon for options.',
-            icon: iconPath
+    };
+
+    const template = [
+        { label: 'Open Dashboard', click: showDashboard },
+        { type: 'separator' },
+    ];
+
+    if (stats && stats.deepWork) {
+        template.push({
+            label: `Deep Work: ${formatDurationFromMs(stats.deepWork.remainingMs)} remaining`,
+            enabled: false
         });
-        notification.show();
-        console.log('Main: First-time notification shown');
+        template.push({ type: 'separator' });
+    }
+
+    template.push({ label: "Today's usage", enabled: false });
+    if (stats && stats.sites.length) {
+        for (const s of stats.sites) {
+            const tags = [];
+            if (s.isLocked) tags.push('LOCKED');
+            else if (s.isBlocked) tags.push('blocked');
+            if (s.isOver && !s.isLocked) tags.push('over limit');
+            const tagStr = tags.length ? `  [${tags.join(', ')}]` : '';
+            const limitStr = s.limit > 0 ? `${formatMinutes(s.seconds)} / ${s.limit}m` : `${formatMinutes(s.seconds)}`;
+            template.push({
+                label: `  ${s.name}: ${limitStr}${tagStr}`,
+                enabled: false
+            });
+        }
     } else {
-<<<<<<< Updated upstream
-        console.log('Main: Notifications not supported');
-=======
         template.push({ label: '  (no usage yet today)', enabled: false });
     }
 
@@ -694,8 +718,65 @@ function refreshTray() {
         tray.setContextMenu(Menu.buildFromTemplate(buildTrayMenuTemplate(stats)));
     } catch (e) {
         console.error('Main: refreshTray error:', e);
->>>>>>> Stashed changes
     }
+}
+
+function createTray() {
+    const resolved = resolveTrayIcon();
+    trayResolvedIconPath = resolved.source;
+
+    console.log('Main: Tray creating with icon source:', resolved.source, resolved.fallback ? '(fallback)' : '');
+
+    let attempts = 0;
+    const tryCreate = () => {
+        attempts++;
+        try {
+            tray = new Tray(resolved.image);
+        } catch (e) {
+            console.error(`Main: Tray creation attempt #${attempts} failed:`, e.message);
+            if (attempts < 4) {
+                setTimeout(tryCreate, 1500 * attempts);
+                return;
+            }
+            console.error('Main: Tray creation permanently failed after 4 attempts. App will run windowed only.');
+            return;
+        }
+
+        tray.setToolTip('FocusGuard - starting…');
+        tray.setContextMenu(Menu.buildFromTemplate(buildTrayMenuTemplate(null)));
+
+        tray.on('click', () => {
+            if (mainWindow) {
+                if (mainWindow.isMinimized()) mainWindow.restore();
+                mainWindow.show();
+                mainWindow.focus();
+            }
+        });
+
+        refreshTray();
+
+        if (trayRefreshInterval) clearInterval(trayRefreshInterval);
+        trayRefreshInterval = setInterval(refreshTray, 30_000);
+
+        console.log('Main: Tray created successfully');
+
+        if (resolved.fallback && Notification.isSupported()) {
+            const n = new Notification({
+                title: 'FocusGuard',
+                body: 'Using a fallback tray icon — the bundled icon.ico could not be located.'
+            });
+            n.show();
+        } else if (!resolved.fallback && Notification.isSupported()) {
+            const notification = new Notification({
+                title: 'FocusGuard',
+                body: 'Running in the background. Right-click the tray icon for live stats.',
+                icon: resolved.source
+            });
+            notification.show();
+        }
+    };
+
+    tryCreate();
 }
 
 app.whenReady().then(() => {
@@ -718,10 +799,6 @@ app.whenReady().then(() => {
     // Initialize managers
     dataManager = new DataManager();
     hostsManager = new HostsManager();
-<<<<<<< Updated upstream
-    usageTracker = new UsageTracker(dataManager, hostsManager);
-    
-=======
     const getDeepExtras = () =>
         (dataManager.normalizeDeepWork(dataManager.getDeepWork()) ? dataManager.computeDeepWorkDomains() : []);
     usageTracker = new UsageTracker(dataManager, hostsManager, getDeepExtras);
@@ -732,7 +809,6 @@ app.whenReady().then(() => {
     });
     hostsManager.startHostsWatchdog();
 
->>>>>>> Stashed changes
     console.log('Main: Initialized managers');
     console.log('Main: Site settings:', dataManager.getSiteSettings());
     console.log('Main: Today\'s usage:', dataManager.getTodayUsage());
@@ -798,9 +874,6 @@ app.whenReady().then(() => {
     } else {
         dataManager.deleteDeepWork(); // Clean up expired timer
     }
-<<<<<<< Updated upstream
-    
-=======
 
     scheduleNextMidnightRollover();
     startDigestScheduler();
@@ -813,7 +886,6 @@ app.whenReady().then(() => {
         setTimeout(() => { try { showHud(); } catch (e) { console.error('HUD restore:', e); } }, 600);
     }
 
->>>>>>> Stashed changes
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });
@@ -828,8 +900,6 @@ app.on('window-all-closed', () => {
 
 // Clean up tray on app quit
 app.on('before-quit', () => {
-<<<<<<< Updated upstream
-=======
     if (trayRefreshInterval) {
         clearInterval(trayRefreshInterval);
         trayRefreshInterval = null;
@@ -842,7 +912,13 @@ app.on('before-quit', () => {
         clearInterval(updaterCheckInterval);
         updaterCheckInterval = null;
     }
->>>>>>> Stashed changes
+    if (midnightTimer) {
+        clearTimeout(midnightTimer);
+        midnightTimer = null;
+    }
+    if (hostsManager && typeof hostsManager.stopHostsWatchdog === 'function') {
+        try { hostsManager.stopHostsWatchdog(); } catch (_) {}
+    }
     if (tray) {
         tray.destroy();
         console.log('Main: Tray destroyed');
@@ -851,7 +927,27 @@ app.on('before-quit', () => {
 
 // --- IPC Handlers ---
 ipcMain.handle('get-initial-data', async () => {
-    return dataManager.getInitialData();
+    let hostsIntegrity = null;
+    try {
+        if (hostsManager && dataManager) {
+            const expected = combinedExpectedDomainsForHosts();
+            const v = hostsManager.verifyHostsSection(expected);
+            hostsIntegrity = {
+                ok: v.ok,
+                unexpectedMissing: v.unexpectedMissing,
+                unexpectedExtra: v.unexpectedExtra,
+                sectionPresent: v.sectionPresent,
+                expectedDomainCount: expected.length
+            };
+        }
+    } catch (e) {
+        console.warn('get-initial-data: integrity probe failed', e.message);
+    }
+    return dataManager.getInitialData({ hostsIntegrity });
+});
+
+ipcMain.handle('repair-hosts-now', async () => {
+    return applyHostsToSystem('manual_repair');
 });
 
 ipcMain.handle('lock-site-for-today', (event, siteName) => {
@@ -1086,24 +1182,15 @@ ipcMain.handle('test-admin-access', async () => {
 
 // --- Core Logic ---
 function startDeepWork(durationInSeconds) {
-    if (deepWorkTimeout) clearTimeout(deepWorkTimeout); // Clear any existing timer
+    clearDeepWorkTimers(); // Clear any existing timer
 
-    const endTime = new Date().getTime() + durationInSeconds * 1000;
-    dataManager.setDeepWork({ endTime });
-    
-    // Get current blocked domains and add deep work sites
-    const currentBlocked = dataManager.getBlockedDomains();
-    hostsManager.updateHostsFile(currentBlocked, deepWorkSites); // Immediately block deep work sites
+    const endTimeMs = Date.now() + durationInSeconds * 1000;
+    const remainingMs = endTimeMs - Date.now();
+    dataManager.setDeepWork({ endTime: endTimeMs });
 
-<<<<<<< Updated upstream
-    const interval = setInterval(() => {
-        const now = new Date().getTime();
-        const remaining = endTime - now;
-        if (mainWindow) {
-            mainWindow.webContents.send('deep-work-update', { isActive: true, remaining });
-        }
-    }, 1000);
-=======
+    // Apply hosts (current blocked domains + dynamic deep-work extras from config).
+    applyHostsToSystem('deep_work_start').catch(e => console.error('Deep work start hosts apply:', e));
+
     const broadcastDw = (payload) => {
         if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('deep-work-update', payload);
@@ -1122,24 +1209,20 @@ function startDeepWork(durationInSeconds) {
     };
     tick();
     deepWorkInterval = setInterval(tick, 1000);
->>>>>>> Stashed changes
 
-    deepWorkTimeout = setTimeout(() => {
-        clearInterval(interval);
-        dataManager.deleteDeepWork();
-<<<<<<< Updated upstream
-        hostsManager.updateHostsFile(dataManager.getBlockedDomains()); // Unblock deep work sites
-        if (mainWindow) {
-            mainWindow.webContents.send('deep-work-update', { isActive: false, remaining: 0 });
+    deepWorkTimeout = setTimeout(async () => {
+        if (deepWorkInterval) {
+            clearInterval(deepWorkInterval);
+            deepWorkInterval = null;
         }
-    }, durationInSeconds * 1000);
-=======
-        await applyHostsToSystem('deep_work_complete');
+        dataManager.deleteDeepWork();
+        try { await applyHostsToSystem('deep_work_complete'); }
+        catch (e) { console.error('Deep work end hosts apply:', e); }
         broadcastDw({ isActive: false, remainingMs: 0 });
         refreshTray();
     }, remainingMs);
->>>>>>> Stashed changes
 
+    refreshTray();
     return { success: true };
 }
 
