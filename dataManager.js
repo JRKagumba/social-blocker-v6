@@ -526,6 +526,74 @@ class DataManager {
         return { success: true };
     }
 
+    /**
+     * Total unblock events logged today across all sites. Used by the
+     * progressive friction policy: the more you've already caved today,
+     * the more onerous the next commitment becomes.
+     */
+    getTodayUnblockTotal() {
+        const today = this.getLocalISODate();
+        return this.getUnblockHistory().filter(e => {
+            return typeof e?.timestamp === 'string' && e.timestamp.startsWith(today);
+        }).length;
+    }
+
+    // ---------------- Progressive Friction ----------------
+    // Pure, testable policy: given the number of unblock events ALREADY
+    // logged today (priorCount), return what the next commitment should
+    // require. Behavioural design: the marginal cost of each subsequent
+    // unblock should rise steeply enough to make impulse defections
+    // expensive, but not so steeply that the user gives up and disables
+    // the whole product.
+
+    static computeFrictionPolicy(priorCount, options = {}) {
+        const enabled = options.enabled !== false;
+        const totalSentences = Math.max(1, Number(options.totalSentences) || 5);
+
+        // Disabled: legacy behaviour — full paragraph, no cooldown.
+        if (!enabled) {
+            return { tier: 0, sentenceCount: totalSentences, cooldownSeconds: 0 };
+        }
+
+        // Ladder: 1 -> 2 -> 3 -> 4 (+15s) -> full (+60s).
+        if (priorCount <= 0) return { tier: 1, sentenceCount: 1, cooldownSeconds: 0 };
+        if (priorCount === 1) return { tier: 2, sentenceCount: 2, cooldownSeconds: 0 };
+        if (priorCount === 2) return { tier: 3, sentenceCount: 3, cooldownSeconds: 0 };
+        if (priorCount === 3) return { tier: 4, sentenceCount: 4, cooldownSeconds: 15 };
+        return { tier: 5, sentenceCount: totalSentences, cooldownSeconds: 60 };
+    }
+
+    /**
+     * Return the first N sentences of `text`. Sentence boundary = '.', '!' or
+     * '?' followed by whitespace/end. If the source has fewer sentences than
+     * requested (or we can't split cleanly), return the whole text — we'd
+     * rather over-require than silently under-require.
+     */
+    static extractFirstNSentences(text, n) {
+        if (typeof text !== 'string') return '';
+        const N = Math.max(1, Math.floor(Number(n) || 1));
+        // Split keeping trailing punctuation+whitespace as the delimiter.
+        const matches = text.match(/[^.!?]+[.!?]+(?:\s+|$)/g);
+        if (!matches || matches.length === 0) return text;
+        if (matches.length <= N) return text;
+        return matches.slice(0, N).join('').trimEnd();
+    }
+
+    // Progressive friction config. Defaults to enabled=true; user can
+    // disable from Settings if they find the escalation excessive.
+    getProgressiveFrictionConfig() {
+        const raw = this.store.get('progressiveFrictionConfig', null);
+        return {
+            enabled: raw === null ? true : !!raw.enabled
+        };
+    }
+
+    setProgressiveFrictionConfig(partial) {
+        const next = { ...this.getProgressiveFrictionConfig(), ...(partial || {}) };
+        this.store.set('progressiveFrictionConfig', next);
+        return next;
+    }
+
     getTodayUnblocks() {
         const today = this.getLocalISODate();
         const history = this.getUnblockHistory();
@@ -674,6 +742,7 @@ class DataManager {
             deepWorkConfig: this.getDeepWorkConfig(),
             deepWorkSpecialSites: this.getDeepWorkSpecialSites(),
             deepWorkSchedule: this.getDeepWorkSchedule(),
+            progressiveFrictionConfig: this.getProgressiveFrictionConfig(),
             ...hostsIntegrityOverlay
         };
     }

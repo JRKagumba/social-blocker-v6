@@ -40,6 +40,11 @@ const commitmentParagraph = document.getElementById('commitment-paragraph');
 const commitmentInput = document.getElementById('commitment-input');
 const cancelCommitmentBtn = document.getElementById('cancel-commitment-btn');
 const confirmCommitmentBtn = document.getElementById('confirm-commitment-btn');
+const commitmentTierBadge = document.getElementById('commitment-tier-badge');
+const commitmentContext = document.getElementById('commitment-context');
+const commitmentCooldownRow = document.getElementById('commitment-cooldown-row');
+const commitmentCooldownSeconds = document.getElementById('commitment-cooldown-seconds');
+const commitmentCooldownHint = document.getElementById('commitment-cooldown-hint');
 // Hosts integrity banner (added in the Linear redesign — was referenced as an
 // undeclared global before, which would have thrown if syncBannerStackPlacement
 // ever ran with #deep-work-banner present).
@@ -50,7 +55,27 @@ const hostsRepairBtn = document.getElementById('hosts-repair-btn');
 // --- State Variables ---
 let siteSettings = {};
 let historyChartInstance = null;
-let commitmentState = { siteName: null, newLimit: 0, oldLimit: 0, inputElement: null };
+// `commitmentState.kind` distinguishes the two friction entrypoints:
+//   - 'limit-increase' (existing): on confirm, persist the new limit
+//   - 'manual-unblock' (new): on confirm, leave the toggle in OFF state and let
+//     the Apply Changes flow run normally. On cancel, snap the toggle back ON.
+// `requiredText` is the tier-scaled portion the user must type (NOT the full
+// `paragraph`). `cooldownSeconds` (>0 for tier 4+) gates input until elapsed.
+let commitmentState = {
+    kind: null,
+    siteName: null,
+    newLimit: 0,
+    oldLimit: 0,
+    inputElement: null,
+    toggleElement: null,
+    requiredText: '',
+    fullParagraph: '',
+    tier: 1,
+    cooldownSeconds: 0,
+    cooldownTimer: null,
+    onConfirm: null,
+    onCancel: null
+};
 
 // --- Pending Changes State ---
 let savedToggleStates = {}; // The state saved to disk (current reality)
@@ -699,14 +724,42 @@ function updatePendingChangesBanner() {
 function handleToggleChange(siteName) {
     const toggle = document.getElementById(`toggle-${siteName}`);
     if (!toggle) return;
-    
-    // Update pending state
-    pendingToggleStates[siteName] = toggle.checked;
-    
-    // Detect if this is an unblock event for logging (only when applying, not pending)
-    // We'll handle logging when changes are actually applied
-    
-    // Update the banner
+
+    const wasBlocked = !!savedToggleStates[siteName];
+    const previouslyPending = pendingToggleStates[siteName];
+    const nowChecked = toggle.checked;
+
+    // Manual unblock detected: was blocked (saved=true) AND user just turned
+    // the toggle OFF AND this is a NEW pending change (not just flipping back
+    // to the saved state). Gate it behind progressive friction.
+    const isFreshUnblockIntent = wasBlocked && !nowChecked && previouslyPending !== false;
+
+    if (isFreshUnblockIntent) {
+        // Snap the toggle back ON immediately while we ask for commitment; on
+        // confirm we'll flip it OFF for real. This avoids a flicker where the
+        // pending banner appears, then disappears if the user bails.
+        toggle.checked = true;
+
+        beginCommitmentFlow({
+            kind: 'manual-unblock',
+            siteName,
+            toggleElement: toggle,
+            onConfirm: () => {
+                toggle.checked = false;
+                pendingToggleStates[siteName] = false;
+                updatePendingChangesBanner();
+            },
+            onCancel: () => {
+                // Restore prior state — either still-saved or whatever was pending.
+                toggle.checked = previouslyPending ?? wasBlocked;
+                pendingToggleStates[siteName] = previouslyPending ?? wasBlocked;
+                updatePendingChangesBanner();
+            }
+        });
+        return;
+    }
+
+    pendingToggleStates[siteName] = nowChecked;
     updatePendingChangesBanner();
 }
 
@@ -866,7 +919,7 @@ function setupEventListeners() {
         showTab('settings');
     });
     heatMapDaysSelect.addEventListener('change', () => renderHeatMap());
-    cancelCommitmentBtn.addEventListener('click', closeCommitmentModal);
+    cancelCommitmentBtn.addEventListener('click', () => closeCommitmentModal(true));
     confirmCommitmentBtn.addEventListener('click', confirmCommitment);
     commitmentInput.addEventListener('input', validateCommitmentInput);
     commitmentInput.addEventListener('keydown', (e) => { 
@@ -933,15 +986,27 @@ async function handleLimitChange(input) {
     }
 
     if (newLimit > oldLimit) {
-        // Increasing limit requires commitment
-        commitmentState = { siteName, newLimit, oldLimit, inputElement: input };
-        const paragraph = await window.electronAPI.getCommitmentParagraph();
-        commitmentParagraph.textContent = paragraph;
-        openCommitmentModal();
+        beginCommitmentFlow({
+            kind: 'limit-increase',
+            siteName,
+            inputElement: input,
+            newLimit,
+            oldLimit,
+            onConfirm: async () => {
+                siteSettings[siteName].limit = newLimit;
+                input.dataset.oldValue = newLimit;
+                await window.electronAPI.setSiteLimit({ siteName, limit: newLimit });
+                // A confirmed limit increase is also a form of unblock —
+                // log it so the friction tier compounds across the day.
+                await window.electronAPI.logUnblockEvent(siteName);
+            },
+            onCancel: () => {
+                input.value = oldLimit;
+            }
+        });
     } else {
-        // Decreasing limit is easy
         siteSettings[siteName].limit = newLimit;
-        input.dataset.oldValue = newLimit; // Update old value
+        input.dataset.oldValue = newLimit;
         await window.electronAPI.setSiteLimit({ siteName, limit: newLimit });
     }
 }
@@ -1805,34 +1870,186 @@ async function refreshSettingsPanel() {
     await refreshReportSettings();
 }
 
+async function initSettingsFrictionSection() {
+    const el = document.getElementById('settings-friction-enabled');
+    if (!el) return;
+    try {
+        const cfg = await window.electronAPI.getProgressiveFrictionConfig();
+        el.checked = cfg.enabled !== false;
+    } catch (e) {
+        console.error('initSettingsFrictionSection:', e);
+        el.checked = true;
+    }
+    el.addEventListener('change', async () => {
+        try {
+            await window.electronAPI.setProgressiveFrictionConfig({ enabled: el.checked });
+        } catch (e) {
+            console.error('friction toggle save failed:', e);
+            // Revert UI if save failed.
+            el.checked = !el.checked;
+        }
+    });
+}
+
 async function initSettingsPanel() {
     await initSettingsUpdaterSection();
     await initSettingsStartupSection();
     await initSettingsHudSection();
+    await initSettingsFrictionSection();
 }
 
-// --- Commitment Modal Logic ---
-function openCommitmentModal() {
+// ---------------------------------------------------------------------------
+// Commitment modal (progressive friction)
+// ---------------------------------------------------------------------------
+//
+// Two entrypoints flow through here:
+//   1. handleLimitChange (kind='limit-increase')
+//   2. handleToggleChange detecting a manual unblock (kind='manual-unblock')
+// Both call beginCommitmentFlow(opts) which fetches a tier-scaled payload
+// from main and stages the modal. On confirm/cancel, the opts.onConfirm /
+// opts.onCancel callbacks fire — keeping the modal agnostic about WHAT
+// it's gating.
+
+async function beginCommitmentFlow(opts) {
+    let payload;
+    try {
+        payload = await window.electronAPI.getCommitmentParagraph();
+    } catch (e) {
+        console.error('Commitment fetch failed; bailing out (treating as cancel):', e);
+        if (typeof opts.onCancel === 'function') opts.onCancel();
+        return;
+    }
+
+    commitmentState = {
+        kind: opts.kind,
+        siteName: opts.siteName,
+        newLimit: opts.newLimit ?? null,
+        oldLimit: opts.oldLimit ?? null,
+        inputElement: opts.inputElement ?? null,
+        toggleElement: opts.toggleElement ?? null,
+        requiredText: payload.requiredText || payload.paragraph || '',
+        fullParagraph: payload.paragraph || '',
+        tier: payload.tier || 1,
+        cooldownSeconds: payload.cooldownSeconds || 0,
+        cooldownTimer: null,
+        onConfirm: opts.onConfirm || (() => {}),
+        onCancel:  opts.onCancel  || (() => {}),
+        progressiveEnabled: !!payload.progressiveEnabled,
+        priorCount: payload.priorCount || 0
+    };
+
+    renderCommitmentModal(payload);
+    openCommitmentModalUI();
+    startCommitmentCooldown();
+}
+
+function renderCommitmentModal(payload) {
+    const { tier, requiredText, fullParagraph, cooldownSeconds, priorCount, progressiveEnabled } = commitmentState;
+
+    // Tier badge.
+    if (progressiveEnabled) {
+        commitmentTierBadge.textContent = `Unblock #${priorCount + 1} today \u00b7 Tier ${tier}`;
+        commitmentTierBadge.style.color = tier >= 4 ? 'var(--warn)' : 'var(--ink-2)';
+        commitmentTierBadge.style.borderColor = tier >= 4 ? 'var(--warn)' : 'var(--line)';
+    } else {
+        commitmentTierBadge.textContent = 'Full paragraph';
+        commitmentTierBadge.style.color = 'var(--ink-2)';
+        commitmentTierBadge.style.borderColor = 'var(--line)';
+    }
+
+    // Context line varies by entrypoint.
+    if (commitmentState.kind === 'manual-unblock') {
+        commitmentContext.textContent =
+            `Unblocking ${commitmentState.siteName}. Type the text below exactly to proceed.`;
+    } else if (commitmentState.kind === 'limit-increase') {
+        commitmentContext.textContent =
+            `Raising the limit on ${commitmentState.siteName}. Type the text below exactly to proceed.`;
+    } else {
+        commitmentContext.textContent = 'Type the text below exactly to proceed.';
+    }
+
+    // Render required text in normal weight, with the rest of the paragraph
+    // faded (so the user can see the full case, but only types the slice).
+    const safeReq = requiredText.replace(/</g, '&lt;');
+    const remainder = (fullParagraph || '').slice(requiredText.length);
+    const safeRem = remainder.replace(/</g, '&lt;');
+    if (safeRem && progressiveEnabled && tier < 5) {
+        commitmentParagraph.innerHTML =
+            `<span style="color: var(--ink);">${safeReq}</span>` +
+            `<span style="color: var(--ink-4); opacity: 0.45;">${safeRem}</span>`;
+    } else {
+        commitmentParagraph.innerHTML = `<span style="color: var(--ink);">${safeReq}</span>`;
+    }
+
+    // Cooldown row.
+    if (cooldownSeconds > 0) {
+        commitmentCooldownRow.classList.remove('hidden');
+        commitmentCooldownSeconds.textContent = String(cooldownSeconds);
+        commitmentCooldownHint.textContent =
+            `Sit with this for ${cooldownSeconds}s before you can type.`;
+    } else {
+        commitmentCooldownRow.classList.add('hidden');
+    }
+
     commitmentInput.value = '';
+    commitmentInput.placeholder = cooldownSeconds > 0 ? 'Waiting for cooldown...' : 'Type the text above exactly';
+    commitmentInput.disabled = cooldownSeconds > 0;
     confirmCommitmentBtn.disabled = true;
+}
+
+function openCommitmentModalUI() {
     commitmentModal.classList.remove('hidden');
     modalContent.classList.remove('scale-95', 'opacity-0');
 }
 
-function closeCommitmentModal() {
-    commitmentState.inputElement.value = commitmentState.oldLimit; // Revert UI
+function startCommitmentCooldown() {
+    if (commitmentState.cooldownTimer) {
+        clearInterval(commitmentState.cooldownTimer);
+        commitmentState.cooldownTimer = null;
+    }
+    if (!(commitmentState.cooldownSeconds > 0)) return;
+
+    let remaining = commitmentState.cooldownSeconds;
+    commitmentCooldownSeconds.textContent = String(remaining);
+    commitmentState.cooldownTimer = setInterval(() => {
+        remaining -= 1;
+        if (remaining <= 0) {
+            clearInterval(commitmentState.cooldownTimer);
+            commitmentState.cooldownTimer = null;
+            commitmentCooldownRow.classList.add('hidden');
+            commitmentInput.disabled = false;
+            commitmentInput.placeholder = 'Type the text above exactly';
+            commitmentInput.focus();
+            validateCommitmentInput();
+        } else {
+            commitmentCooldownSeconds.textContent = String(remaining);
+        }
+    }, 1000);
+}
+
+function closeCommitmentModal(viaCancel = true) {
+    if (commitmentState.cooldownTimer) {
+        clearInterval(commitmentState.cooldownTimer);
+        commitmentState.cooldownTimer = null;
+    }
+    if (viaCancel && typeof commitmentState.onCancel === 'function') {
+        try { commitmentState.onCancel(); } catch (e) { console.error('Commitment cancel cb:', e); }
+    }
     modalContent.classList.add('scale-95', 'opacity-0');
     setTimeout(() => commitmentModal.classList.add('hidden'), 150);
 }
 
 function validateCommitmentInput() {
-    confirmCommitmentBtn.disabled = commitmentInput.value !== commitmentParagraph.textContent;
+    confirmCommitmentBtn.disabled =
+        commitmentInput.disabled ||
+        commitmentInput.value !== commitmentState.requiredText;
 }
 
 async function confirmCommitment() {
-    const { siteName, newLimit, inputElement } = commitmentState;
-    siteSettings[siteName].limit = newLimit;
-    inputElement.dataset.oldValue = newLimit;
-    await window.electronAPI.setSiteLimit({ siteName, limit: newLimit });
-    closeCommitmentModal();
+    if (confirmCommitmentBtn.disabled) return;
+    const cb = commitmentState.onConfirm;
+    closeCommitmentModal(/* viaCancel */ false);
+    if (typeof cb === 'function') {
+        try { await cb(); } catch (e) { console.error('Commitment confirm cb:', e); }
+    }
 }

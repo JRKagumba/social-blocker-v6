@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // --- Usage, Limits, and Friction ---
   setSiteLimit: (payload) => ipcRenderer.invoke('set-site-limit', payload),
   getCommitmentParagraph: () => ipcRenderer.invoke('get-commitment-paragraph'),
+  getProgressiveFrictionConfig: () => ipcRenderer.invoke('get-progressive-friction-config'),
+  setProgressiveFrictionConfig: (partial) => ipcRenderer.invoke('set-progressive-friction-config', partial),
   
   // --- Deep Work Mode ---
   startDeepWork: (durationInSeconds) => ipcRenderer.invoke('start-deep-work', durationInSeconds),

@@ -1094,8 +1094,39 @@ ipcMain.handle('get-manual-locks', () => {
     return dataManager.getManualLocks();
 });
 
+// Returns a tier-scaled commitment payload.
+//   { paragraph, requiredText, tier, sentenceCount, cooldownSeconds, priorCount }
+// The renderer enforces:
+//   - cooldownSeconds before the input becomes editable
+//   - typed value must exactly equal `requiredText` (which is a leading
+//     N-sentence slice of `paragraph` chosen by computeFrictionPolicy)
+// Sending the full `paragraph` too is helpful for displaying the unrequired
+// remainder in muted text — a subtle reminder that the full case for
+// discipline still exists, the user just doesn't have to type it yet.
 ipcMain.handle('get-commitment-paragraph', () => {
-    return commitmentParagraphs[Math.floor(Math.random() * commitmentParagraphs.length)];
+    const DataManager = dataManager.constructor;
+    const cfg = dataManager.getProgressiveFrictionConfig();
+    const priorCount = dataManager.getTodayUnblockTotal();
+    const policy = DataManager.computeFrictionPolicy(priorCount, { enabled: cfg.enabled });
+    const paragraph = commitmentParagraphs[Math.floor(Math.random() * commitmentParagraphs.length)];
+    const requiredText = DataManager.extractFirstNSentences(paragraph, policy.sentenceCount);
+    return {
+        paragraph,
+        requiredText,
+        tier: policy.tier,
+        sentenceCount: policy.sentenceCount,
+        cooldownSeconds: policy.cooldownSeconds,
+        priorCount,
+        progressiveEnabled: cfg.enabled
+    };
+});
+
+ipcMain.handle('get-progressive-friction-config', () => {
+    return dataManager.getProgressiveFrictionConfig();
+});
+
+ipcMain.handle('set-progressive-friction-config', (_event, partial) => {
+    return dataManager.setProgressiveFrictionConfig(partial || {});
 });
 
 ipcMain.handle('update-hosts-file', async (event, sitesToBlock) => {

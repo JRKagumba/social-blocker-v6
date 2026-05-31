@@ -716,6 +716,31 @@
                     </div>
                 </section>
 
+                <!-- =================== FRICTION ==================== -->
+                <section class="panel p-5 mb-4">
+                    <p class="label mb-1">Self-control</p>
+                    <h2 class="font-semibold mb-1" style="font-size: 15px;">Progressive friction</h2>
+                    <p style="color: var(--ink-3); font-size: 12px;" class="mb-4">
+                        Make each unblock more expensive than the last. The first cave today asks for one sentence;
+                        the fifth asks for the full paragraph plus a 60-second cooldown timer.
+                    </p>
+                    <div class="panel-2 p-3 mb-2">
+                        <label class="flex items-center justify-between cursor-pointer">
+                            <div>
+                                <p style="font-size: 13px; color: var(--ink);">Enable escalating friction</p>
+                                <p style="font-size: 11px; color: var(--ink-3); margin-top: 2px;">
+                                    When off, every unblock requires typing the full paragraph (legacy behaviour).
+                                </p>
+                            </div>
+                            <input type="checkbox" id="settings-friction-enabled" class="w-4 h-4" checked>
+                        </label>
+                    </div>
+                    <div class="num" style="font-size: 11px; color: var(--ink-3);">
+                        Ladder: 1st = 1 sentence \u00b7 2nd = 2 sentences \u00b7 3rd = 3 sentences \u00b7
+                        4th = 4 sentences + 15s cooldown \u00b7 5th+ = full paragraph + 60s cooldown
+                    </div>
+                </section>
+
                 <!-- =================== REPORTS ==================== -->
                 <section class="panel p-5 mb-4">
                     <p class="label mb-1">Local digests</p>
@@ -861,14 +886,46 @@
          ==================================================== -->
     <div id="commitment-modal" class="hidden">
         <div id="modal-content">
-            <h2 class="font-semibold mb-3" style="font-size: 16px; color: var(--warn);">Commitment required</h2>
-            <p style="color: var(--ink-2); font-size: 13px;" class="mb-4">
-                To increase this time limit, you must demonstrate your commitment. Please type the following paragraph exactly as it appears. The backspace key is disabled.
+            <div class="flex items-center justify-between mb-3">
+                <h2 class="font-semibold" style="font-size: 16px; color: var(--warn);">Commitment required</h2>
+                <span id="commitment-tier-badge"
+                      class="num"
+                      style="font-size: 11px; padding: 3px 10px; border-radius: 999px;
+                             background: var(--bg-2); border: 1px solid var(--line);
+                             color: var(--ink-2);">
+                </span>
+            </div>
+            <p id="commitment-context"
+               style="color: var(--ink-2); font-size: 13px;" class="mb-4">
+                To proceed, type the following exactly. The backspace key is disabled.
             </p>
+
+            <!-- Cooldown overlay: shown when tier >= 4. Input stays disabled until 0. -->
+            <div id="commitment-cooldown-row" class="hidden mb-3 flex items-center gap-3"
+                 style="padding: 10px 14px; background: var(--bg-2);
+                        border: 1px solid var(--warn); border-radius: 6px;">
+                <div style="width: 28px; height: 28px; border-radius: 50%;
+                            border: 2px solid var(--warn); display: flex;
+                            align-items: center; justify-content: center;
+                            color: var(--warn); font-weight: 700; font-size: 11px;"
+                     class="num">
+                    <span id="commitment-cooldown-seconds">--</span>
+                </div>
+                <div style="flex: 1;">
+                    <div style="color: var(--warn); font-size: 13px; font-weight: 600;">Pause</div>
+                    <div style="color: var(--ink-3); font-size: 11px;" id="commitment-cooldown-hint">
+                        Sit with this for a moment before you can type.
+                    </div>
+                </div>
+            </div>
+
             <p id="commitment-paragraph"
                class="panel-2 p-4 mb-4 italic"
-               style="color: var(--ink-2); font-size: 13px; line-height: 1.55; user-select: all;"></p>
-            <textarea id="commitment-input" rows="6" class="w-full mb-4" style="font-family: inherit; line-height: 1.55;"></textarea>
+               style="color: var(--ink-2); font-size: 13px; line-height: 1.55; user-select: all;">
+                <!-- Required-text portion populated by renderer; rest of paragraph faded -->
+            </p>
+            <textarea id="commitment-input" rows="6" class="w-full mb-4"
+                      style="font-family: inherit; line-height: 1.55;"></textarea>
             <div class="flex justify-end gap-2">
                 <button id="cancel-commitment-btn" class="btn">Cancel</button>
                 <button id="confirm-commitment-btn" class="btn btn-primary" disabled>Confirm</button>

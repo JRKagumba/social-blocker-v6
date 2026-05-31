@@ -569,7 +569,81 @@ group('DataManager.computeNextFireTime', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 6) Summary
+// 6) Progressive friction policy
+// ---------------------------------------------------------------------------
+group('DataManager.computeFrictionPolicy ladder', () => {
+    const DataManager = require('../dataManager');
+
+    const t1 = DataManager.computeFrictionPolicy(0, { enabled: true });
+    ok('priorCount=0 -> tier 1', t1.tier === 1 && t1.sentenceCount === 1 && t1.cooldownSeconds === 0, t1);
+
+    const t2 = DataManager.computeFrictionPolicy(1, { enabled: true });
+    ok('priorCount=1 -> tier 2 (2 sentences)', t2.tier === 2 && t2.sentenceCount === 2 && t2.cooldownSeconds === 0, t2);
+
+    const t3 = DataManager.computeFrictionPolicy(2, { enabled: true });
+    ok('priorCount=2 -> tier 3 (3 sentences)', t3.tier === 3 && t3.sentenceCount === 3 && t3.cooldownSeconds === 0, t3);
+
+    const t4 = DataManager.computeFrictionPolicy(3, { enabled: true });
+    ok('priorCount=3 -> tier 4 (4 sentences + 15s)', t4.tier === 4 && t4.sentenceCount === 4 && t4.cooldownSeconds === 15, t4);
+
+    const t5 = DataManager.computeFrictionPolicy(4, { enabled: true });
+    ok('priorCount=4 -> tier 5 (full + 60s)', t5.tier === 5 && t5.sentenceCount === 5 && t5.cooldownSeconds === 60, t5);
+
+    const t5b = DataManager.computeFrictionPolicy(99, { enabled: true });
+    ok('priorCount=99 stays at tier 5', t5b.tier === 5 && t5b.cooldownSeconds === 60, t5b);
+
+    const disabled = DataManager.computeFrictionPolicy(0, { enabled: false });
+    ok('disabled -> tier 0 (full paragraph, no cooldown)',
+       disabled.tier === 0 && disabled.cooldownSeconds === 0 && disabled.sentenceCount === 5, disabled);
+});
+
+group('DataManager.extractFirstNSentences', () => {
+    const DataManager = require('../dataManager');
+
+    const three = 'First sentence. Second sentence here. Third one too! Fourth?';
+    ok('extract 1 of 4', DataManager.extractFirstNSentences(three, 1) === 'First sentence.');
+    ok('extract 2 of 4',
+       DataManager.extractFirstNSentences(three, 2) === 'First sentence. Second sentence here.',
+       DataManager.extractFirstNSentences(three, 2));
+    ok('extract 3 of 4',
+       DataManager.extractFirstNSentences(three, 3) === 'First sentence. Second sentence here. Third one too!',
+       DataManager.extractFirstNSentences(three, 3));
+    ok('N >= sentences returns whole text', DataManager.extractFirstNSentences(three, 10) === three);
+    ok('handles "?" sentence terminator',
+       DataManager.extractFirstNSentences('Why? Because.', 1) === 'Why?');
+    ok('non-string returns empty', DataManager.extractFirstNSentences(null, 2) === '');
+    ok('text with no terminator returns whole', DataManager.extractFirstNSentences('no period', 2) === 'no period');
+});
+
+group('DataManager.getTodayUnblockTotal + progressive friction config', () => {
+    const DataManager = require('../dataManager');
+    const dm = new DataManager();
+    // Clean slate.
+    dm.store.set('unblockHistory', []);
+
+    ok('initial total is 0', dm.getTodayUnblockTotal() === 0);
+
+    dm.addUnblockEvent('Reddit');
+    dm.addUnblockEvent('Reddit');
+    dm.addUnblockEvent('YouTube');
+    ok('after 3 events today total = 3', dm.getTodayUnblockTotal() === 3);
+
+    // Insert a fake old event manually — should not count.
+    const old = dm.getUnblockHistory();
+    old.push({ timestamp: '1999-01-01T12:00:00.000Z', siteName: 'Twitter' });
+    dm.store.set('unblockHistory', old);
+    ok('old event ignored', dm.getTodayUnblockTotal() === 3);
+
+    // Friction config defaults to enabled.
+    const initial = dm.getProgressiveFrictionConfig();
+    ok('friction config defaults enabled=true', initial.enabled === true);
+    const after = dm.setProgressiveFrictionConfig({ enabled: false });
+    ok('friction config toggle persists', after.enabled === false);
+    ok('friction config re-read matches', dm.getProgressiveFrictionConfig().enabled === false);
+});
+
+// ---------------------------------------------------------------------------
+// 7) Summary
 // ---------------------------------------------------------------------------
 console.log('\n=========================================');
 console.log(`PASS: ${passed}   FAIL: ${failed}   WARN: ${warnings.length}`);
