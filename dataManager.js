@@ -47,16 +47,22 @@ class DataManager {
                     'www.x.com'
                 ],
                 // IMPORTANT: Do NOT include a bare "x" keyword. It will match almost anything.
-                keywords: ['twitter', 'twitter.com', 'x.com'],
+                // Also do NOT include "x.com" as a keyword — the keyword fallback uses
+                // substring matching, which would re-introduce the "netflix.com" false positive.
+                keywords: ['twitter', 'twitter.com'],
+                // Patterns must distinguish *being on X* from *discussing X elsewhere*.
+                // Anchor on title structures that only X.com produces, never a bare
+                // `\bx\.com\b` (matches "How to delete your x.com account" on Reddit).
                 matchPatterns: [
                     // Old brand
                     '\\btwitter\\b',
                     '\\btwitter\\.com\\b',
-                    // Domain
-                    '\\bx\\.com\\b',
-                    // New site titles often look like: "Notifications / X" or "Home / X"
+                    // Modern X.com title formats: "Home / X", "Notifications / X", "(3) Home / X"
                     '\\s/\\sx\\s',
-                    '\\s-\\sx\\s'
+                    '\\s-\\sx\\s',
+                    '\\s/\\sx$',
+                    // Tweet author titles: 'Joe Kagumba on X: "..."'  / 'Foo on X / X'
+                    '\\bon\\sx[:\\s]'
                 ],
                 limit: 60
             },
@@ -65,7 +71,9 @@ class DataManager {
                 // Subdomains matter for hosts-file blocking.
                 domains: ['reddit.com', 'www.reddit.com', 'old.reddit.com', 'new.reddit.com', 'np.reddit.com', 'redd.it'],
                 keywords: ['reddit', 'reddit.com', 'redd.it'],
-                matchPatterns: ['\\breddit\\b', '\\breddit\\.com\\b', '\\bredd\\.it\\b'],
+                // r/<subreddit> pattern catches modern Reddit titles like
+                // "AMA with Linus Torvalds : r/programming" — the dominant title format now.
+                matchPatterns: ['\\breddit\\b', '\\breddit\\.com\\b', '\\bredd\\.it\\b', '\\br/[A-Za-z0-9_]+\\b'],
                 limit: 60
             },
             'LinkedIn': {
