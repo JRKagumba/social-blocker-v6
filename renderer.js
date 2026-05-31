@@ -38,6 +38,12 @@ const commitmentParagraph = document.getElementById('commitment-paragraph');
 const commitmentInput = document.getElementById('commitment-input');
 const cancelCommitmentBtn = document.getElementById('cancel-commitment-btn');
 const confirmCommitmentBtn = document.getElementById('confirm-commitment-btn');
+// Hosts integrity banner (added in the Linear redesign — was referenced as an
+// undeclared global before, which would have thrown if syncBannerStackPlacement
+// ever ran with #deep-work-banner present).
+const hostsIntegrityBanner = document.getElementById('hosts-integrity-banner');
+const hostsIntegrityText = document.getElementById('hosts-integrity-text');
+const hostsRepairBtn = document.getElementById('hosts-repair-btn');
 
 // --- State Variables ---
 let siteSettings = {};
@@ -118,6 +124,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         renderSiteList(initialData.blockedDomains, initialData.usageData, initialData.manualLocks, initialData.today);
         updateMasterStatusText();
         updateDeepWorkUI(initialData.deepWork);
+        updateHostsIntegrityBanner(initialData.hostsIntegrity);
         await renderHistoryChart();
     }
     setupEventListeners();
@@ -161,11 +168,13 @@ function renderReportSettings(settings) {
 function showReportStatus(message, type = 'info') {
     const el = document.getElementById('report-status');
     if (!el) return;
-    const color = type === 'error' ? 'text-red-400'
-                : type === 'success' ? 'text-green-400'
-                : type === 'busy' ? 'text-amber-300'
-                : 'text-gray-400';
-    el.className = `text-sm min-h-[1.5rem] ${color}`;
+    const color = type === 'error'   ? 'var(--bad)'
+                : type === 'success' ? 'var(--good)'
+                : type === 'busy'    ? 'var(--warn)'
+                :                      'var(--ink-3)';
+    el.style.fontSize = '12px';
+    el.style.minHeight = '1.5rem';
+    el.style.color = color;
     el.textContent = message;
 }
 
@@ -241,52 +250,101 @@ window.electronAPI.onDeepWorkUpdate(updateDeepWorkUI);
 // --- UI Rendering & State Updates ---
 function renderSiteList(blockedDomains, usageData, manualLocks = {}, today = null) {
     blockedSitesList.innerHTML = '';
-    
+
     // Initialize saved states
     savedToggleStates = {};
     pendingToggleStates = {};
 
     const todayStr = today || getLocalISODate();
-    
+
     Object.values(siteSettings).forEach(site => {
         const isLockedToday = manualLocks && manualLocks[site.name] === todayStr;
-        const li = document.createElement('li');
-        li.className = 'p-6 bg-gray-700/60 backdrop-blur-sm rounded-xl border border-gray-600/50 flex items-center justify-between shadow-lg hover:shadow-xl transition-all duration-200';
-        if (isLockedToday) li.classList.add('opacity-60');
         const isManuallyBlocked = site.domains.some(domain => blockedDomains.includes(domain));
         const usageToday = usageData[site.name] || 0;
-        const usageInMinutes = (parseFloat(usageToday) / 60).toFixed(1);
+        const usageInMinutes = parseFloat((parseFloat(usageToday) / 60).toFixed(1));
         const isLimitReached = site.limit > 0 && usageInMinutes >= site.limit;
         const isBlocked = isManuallyBlocked || isLimitReached || isLockedToday;
-        
-        const lockControlHtml = isLockedToday
-            ? `<div class="mt-2 text-xs font-semibold text-amber-300">Locked today</div>`
-            : (isLimitReached ? '' : `<button class="lock-today-btn mt-2 text-xs px-2 py-1 rounded bg-gray-800/40 border border-gray-600 hover:bg-gray-800/70 text-gray-200" data-site-name="${site.name}">Lock today</button>`);
 
-        // Store the saved state (what's actually on disk)
+        // Save state to disk model
         savedToggleStates[site.name] = isBlocked;
         pendingToggleStates[site.name] = isBlocked;
 
+        // Compute progress + dot color
+        const pct = site.limit > 0 ? Math.min(100, (usageInMinutes / site.limit) * 100) : 0;
+        let dotColor = 'var(--ink-3)';
+        if (site.limit > 0) {
+            if (pct >= 100) dotColor = 'var(--bad)';
+            else if (pct >= 80) dotColor = 'var(--warn)';
+            else dotColor = 'var(--good)';
+        }
+        const barColor = (pct >= 100) ? 'var(--bad)'
+                       : (pct >= 80)  ? 'var(--warn)'
+                       :                'var(--accent)';
+
+        // Status chip
+        let chip;
+        if (isLockedToday)       chip = `<span class="chip chip-warn">Locked today</span>`;
+        else if (isLimitReached) chip = `<span class="chip chip-bad">Over budget</span>`;
+        else if (isBlocked)      chip = `<span class="chip chip-accent">Blocked</span>`;
+        else if (site.limit > 0 && pct >= 80) {
+            const remaining = Math.max(0, Math.round(site.limit - usageInMinutes));
+            chip = `<span class="chip chip-warn">${remaining}m left</span>`;
+        } else                   chip = `<span class="chip chip-good">On track</span>`;
+
+        // Optional lock-today button (under the name; renderer.js queries
+        // `.lock-today-btn[data-site-name]`)
+        const lockBtnHtml = (!isLockedToday && !isLimitReached)
+            ? `<button class="lock-today-btn" data-site-name="${site.name}"
+                       style="font-size:11px; padding:1px 7px; border-radius:4px;
+                              background: var(--panel-2); border:1px solid var(--line);
+                              color: var(--ink-2); margin-top:2px;">Lock today</button>`
+            : '';
+
+        const li = document.createElement('li');
+        li.className = 'row px-4 py-3 flex items-center';
+        if (isLockedToday) li.classList.add('opacity-60');
+
         li.innerHTML = `
-            <div class="flex flex-col">
-                <span class="text-lg font-semibold">${site.name}</span>
-                <div class="text-xs text-gray-400 mt-1 flex items-center">
-                    <span>Usage:</span> 
-                    <span class="usage-text font-mono mx-1" data-site-name="${site.name}">${usageInMinutes} /</span>
-                    <input type="number" value="${site.limit}" min="0" class="limit-input bg-gray-800 text-white w-12 text-center rounded focus:outline-none focus:ring-2 focus:ring-cyan-500" data-site-name="${site.name}" data-old-value="${site.limit}">
-                    <span class="ml-1">mins</span>
+            <div class="flex-1 flex items-center gap-2 min-w-0">
+                <span class="site-dot" style="background:${dotColor};"></span>
+                <div class="flex flex-col min-w-0">
+                    <span class="text-lg font-semibold" style="font-size:13px; color:var(--ink); line-height:1.2;">${site.name}</span>
+                    ${lockBtnHtml}
                 </div>
-                ${lockControlHtml}
             </div>
-            <label class="relative inline-flex items-center cursor-pointer">
-                <input type="checkbox" id="toggle-${site.name}" class="sr-only peer individual-toggle" data-site-name="${site.name}" ${isBlocked ? 'checked' : ''} ${(isLimitReached || isLockedToday) ? 'disabled' : ''}>
-                <div class="w-14 h-8 toggle-bg rounded-full"></div>
-                <div class="toggle-dot absolute top-1 left-1 h-6 w-6 rounded-full transition-transform"></div>
-            </label>
+            <div style="width:96px;" class="num" >
+                <span class="usage-text" data-site-name="${site.name}" style="color:var(--ink); font-size:12px;">${usageInMinutes.toFixed(1)}m</span>
+            </div>
+            <div style="width:60px;" class="flex items-center">
+                <input type="number" value="${site.limit}" min="0"
+                       class="limit-input num"
+                       data-site-name="${site.name}"
+                       data-old-value="${site.limit}">
+            </div>
+            <div style="width:100px;" class="pr-3">
+                <div style="height:4px; background:var(--line); border-radius:2px; overflow:hidden;">
+                    <div style="height:100%; width:${pct}%; background:${barColor}; transition:width 0.2s;"></div>
+                </div>
+            </div>
+            <div style="width:120px;">
+                ${chip}
+            </div>
+            <div style="width:60px;" class="flex justify-center">
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox"
+                           id="toggle-${site.name}"
+                           class="sr-only peer individual-toggle"
+                           data-site-name="${site.name}"
+                           ${isBlocked ? 'checked' : ''}
+                           ${(isLimitReached || isLockedToday) ? 'disabled' : ''}>
+                    <div class="toggle-bg"></div>
+                    <div class="toggle-dot"></div>
+                </label>
+            </div>
         `;
         blockedSitesList.appendChild(li);
     });
-    
+
     // Reset pending changes on initial render
     hasPendingChanges = false;
     updatePendingChangesBanner();
@@ -305,33 +363,33 @@ async function renderHistoryChart() {
     });
 
     if (historyChartInstance) historyChartInstance.destroy();
-    historyChartInstance = new Chart(chartCanvas.getContext('2d'), { 
-        type: 'bar', 
-        data: { 
-            labels: formattedLabels, // Use the new formatted labels
-            datasets: [{ 
-                label: 'Times Blocker Enabled', 
-                data: historyData.data, 
-                backgroundColor: 'rgba(34, 211, 238, 0.6)', 
-                borderColor: 'rgba(34, 211, 238, 1)', 
-                borderWidth: 1, 
-                borderRadius: 4 
-            }] 
-        }, 
-        options: { 
-            scales: { 
-                y: { 
-                    beginAtZero: true, 
-                    ticks: { color: '#9CA3AF', stepSize: 1 }, 
-                    grid: { color: '#4B5563' } 
-                }, 
-                x: { 
-                    ticks: { color: '#9CA3AF' }, 
-                    grid: { color: 'transparent' } 
-                } 
-            }, 
-            plugins: { legend: { display: false } } 
-        } 
+    historyChartInstance = new Chart(chartCanvas.getContext('2d'), {
+        type: 'bar',
+        data: {
+            labels: formattedLabels,
+            datasets: [{
+                label: 'Times Blocker Enabled',
+                data: historyData.data,
+                backgroundColor: 'rgba(94, 106, 210, 0.55)',
+                borderColor: 'rgba(139, 149, 248, 1)',
+                borderWidth: 1,
+                borderRadius: 3
+            }]
+        },
+        options: {
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: { color: '#9ca0a8', stepSize: 1, font: { size: 11 } },
+                    grid: { color: '#1c1d1f' }
+                },
+                x: {
+                    ticks: { color: '#9ca0a8', font: { size: 11 } },
+                    grid: { color: 'transparent' }
+                }
+            },
+            plugins: { legend: { display: false } }
+        }
     });
 }
 
@@ -351,41 +409,45 @@ async function renderUnblocksTable() {
         .sort((a, b) => b[1] - a[1]); // Sort by unblock count descending
     
     if (unblockedSites.length === 0) {
-        tableContainer.innerHTML = '<p class="text-gray-400 text-center py-8">No sites unblocked today. Great focus! 🎯</p>';
+        tableContainer.innerHTML = '<p style="color: var(--ink-3); text-align:center; padding: 24px 0; font-size:13px;">No sites unblocked today. Great focus.</p>';
         return;
     }
-    
+
     let html = `
         <div class="overflow-x-auto">
-            <table class="w-full text-left">
-                <thead class="border-b border-gray-600">
-                    <tr>
-                        <th class="py-3 px-4 text-cyan-400 font-semibold">Site Name</th>
-                        <th class="py-3 px-4 text-cyan-400 font-semibold text-right">Time Used Today</th>
-                        <th class="py-3 px-4 text-cyan-400 font-semibold text-right">Times Unblocked</th>
+            <table class="w-full text-left" style="font-size:13px;">
+                <thead>
+                    <tr style="border-bottom: 1px solid var(--line);">
+                        <th class="label py-2 px-3" style="text-align:left;">Site</th>
+                        <th class="label py-2 px-3" style="text-align:right;">Time used today</th>
+                        <th class="label py-2 px-3" style="text-align:right;">Unblocks</th>
                     </tr>
                 </thead>
-                <tbody class="divide-y divide-gray-700">
+                <tbody>
     `;
-    
-    unblockedSites.forEach(([siteName, unblockCount]) => {
+
+    unblockedSites.forEach(([siteName, unblockCount], idx) => {
         const usage = todayUsage[siteName] || 0;
         const usageMinutes = (usage / 60).toFixed(1);
+        const countColor = unblockCount >= 3 ? 'var(--bad)'
+                         : unblockCount >= 1 ? 'var(--warn)'
+                         : 'var(--ink-2)';
+        const bottom = (idx === unblockedSites.length - 1) ? '' : 'border-bottom: 1px solid var(--line);';
         html += `
-            <tr class="hover:bg-gray-700/30 transition-colors">
-                <td class="py-3 px-4 font-medium">${siteName}</td>
-                <td class="py-3 px-4 text-right font-mono">${usageMinutes} min</td>
-                <td class="py-3 px-4 text-right font-mono text-yellow-400">${unblockCount}×</td>
+            <tr style="${bottom}">
+                <td class="py-2 px-3" style="color: var(--ink);">${siteName}</td>
+                <td class="py-2 px-3 num" style="text-align:right; color: var(--ink-2);">${usageMinutes} min</td>
+                <td class="py-2 px-3 num" style="text-align:right; color: ${countColor};">${unblockCount}&times;</td>
             </tr>
         `;
     });
-    
+
     html += `
                 </tbody>
             </table>
         </div>
     `;
-    
+
     tableContainer.innerHTML = html;
 }
 
@@ -400,20 +462,18 @@ async function renderUnblocksChart() {
     const labels = Object.keys(unblockData);
     const data = Object.values(unblockData);
     
-    // Color bars based on count (green = 0, yellow = 1-2, red = 3+)
+    // Color bars: 0 = good (green), 1-2 = warn (amber), 3+ = bad (red)
     const backgroundColors = data.map(count => {
-        if (count === 0) return 'rgba(34, 197, 94, 0.6)'; // Green
-        if (count <= 2) return 'rgba(251, 191, 36, 0.6)'; // Yellow
-        return 'rgba(239, 68, 68, 0.6)'; // Red
+        if (count === 0) return 'rgba(76, 183, 130, 0.55)';
+        if (count <= 2) return 'rgba(255, 178, 36, 0.55)';
+        return 'rgba(235, 87, 87, 0.55)';
     });
-    
-    const borderColors = backgroundColors.map(color => color.replace('0.6', '1'));
-    
-    // Destroy existing chart if it exists
+    const borderColors = backgroundColors.map(color => color.replace('0.55', '1'));
+
     if (window.unblocksChartInstance) {
         window.unblocksChartInstance.destroy();
     }
-    
+
     window.unblocksChartInstance = new Chart(canvas.getContext('2d'), {
         type: 'bar',
         data: {
@@ -424,7 +484,7 @@ async function renderUnblocksChart() {
                 backgroundColor: backgroundColors,
                 borderColor: borderColors,
                 borderWidth: 1,
-                borderRadius: 4
+                borderRadius: 3
             }]
         },
         options: {
@@ -432,24 +492,18 @@ async function renderUnblocksChart() {
             scales: {
                 y: {
                     beginAtZero: true,
-                    ticks: { 
-                        color: '#9CA3AF',
-                        stepSize: 1
-                    },
-                    grid: { color: '#4B5563' }
+                    ticks: { color: '#9ca0a8', stepSize: 1, font: { size: 11 } },
+                    grid: { color: '#1c1d1f' }
                 },
                 x: {
-                    ticks: { color: '#9CA3AF' },
+                    ticks: { color: '#9ca0a8', font: { size: 11 } },
                     grid: { color: 'transparent' }
                 }
             },
             plugins: {
                 legend: { display: false },
                 title: {
-                    display: true,
-                    text: 'Unblock Events by Site (Today)',
-                    color: '#9CA3AF',
-                    font: { size: 14 }
+                    display: false
                 }
             }
         }
@@ -467,28 +521,23 @@ async function renderUsageChart() {
     const labels = Object.keys(todayUsage);
     const data = Object.values(todayUsage).map(seconds => (seconds / 60).toFixed(1));
     
-    // Color bars based on site limits
+    // Color bars based on limit utilization (Linear palette).
     const siteSettings = usageData.siteSettings;
     const backgroundColors = labels.map(siteName => {
         const site = siteSettings[siteName];
-        if (!site || site.limit === 0) return 'rgba(156, 163, 175, 0.6)'; // Gray for no limit
-        
+        if (!site || site.limit === 0) return 'rgba(156, 163, 175, 0.45)';
         const usage = todayUsage[siteName] / 60;
-        const limit = site.limit;
-        const percentage = (usage / limit) * 100;
-        
-        if (percentage < 50) return 'rgba(34, 197, 94, 0.6)'; // Green
-        if (percentage < 90) return 'rgba(251, 191, 36, 0.6)'; // Yellow
-        return 'rgba(239, 68, 68, 0.6)'; // Red
+        const percentage = (usage / site.limit) * 100;
+        if (percentage < 50) return 'rgba(76, 183, 130, 0.55)';
+        if (percentage < 90) return 'rgba(255, 178, 36, 0.55)';
+        return 'rgba(235, 87, 87, 0.55)';
     });
-    
-    const borderColors = backgroundColors.map(color => color.replace('0.6', '1'));
-    
-    // Destroy existing chart if it exists
+    const borderColors = backgroundColors.map(color => color.replace(/0\.\d+\)/, '1)'));
+
     if (window.usageChartInstance) {
         window.usageChartInstance.destroy();
     }
-    
+
     window.usageChartInstance = new Chart(canvas.getContext('2d'), {
         type: 'bar',
         data: {
@@ -499,7 +548,7 @@ async function renderUsageChart() {
                 backgroundColor: backgroundColors,
                 borderColor: borderColors,
                 borderWidth: 1,
-                borderRadius: 4
+                borderRadius: 3
             }]
         },
         options: {
@@ -507,27 +556,21 @@ async function renderUsageChart() {
             scales: {
                 y: {
                     beginAtZero: true,
-                    ticks: { 
-                        color: '#9CA3AF',
-                        callback: function(value) {
-                            return value + ' min';
-                        }
+                    ticks: {
+                        color: '#9ca0a8',
+                        font: { size: 11 },
+                        callback: function(value) { return value + ' min'; }
                     },
-                    grid: { color: '#4B5563' }
+                    grid: { color: '#1c1d1f' }
                 },
                 x: {
-                    ticks: { color: '#9CA3AF' },
+                    ticks: { color: '#9ca0a8', font: { size: 11 } },
                     grid: { color: 'transparent' }
                 }
             },
             plugins: {
                 legend: { display: false },
-                title: {
-                    display: true,
-                    text: 'Time Used by Site (Today)',
-                    color: '#9CA3AF',
-                    font: { size: 14 }
-                }
+                title: { display: false }
             }
         }
     });
@@ -542,67 +585,59 @@ async function renderHeatMap() {
     const heatMapData = await window.electronAPI.getHeatMapData(days);
     
     if (!heatMapData || heatMapData.length === 0) {
-        heatMapContainer.innerHTML = '<p class="text-gray-400 text-center py-8">No data available for the selected period.</p>';
+        heatMapContainer.innerHTML = '<p style="color: var(--ink-3); text-align:center; padding: 24px 0; font-size:13px;">No data available for the selected period.</p>';
         return;
     }
 
-    // Find max value for color scaling
     const maxValue = Math.max(...heatMapData.flatMap(day => day.hours));
-    
-    let html = '<div class="heat-map-grid">';
-    
+
+    let html = '<div class="heat-map-grid" style="display:inline-block;">';
+
     // Header row with hours
-    html += '<div class="flex mb-2">';
-    html += '<div class="w-20 text-xs text-gray-400 font-medium"></div>';
+    html += '<div style="display:flex; margin-bottom:6px;">';
+    html += '<div style="width:64px;"></div>';
     for (let hour = 0; hour < 24; hour++) {
-        html += `<div class="w-8 text-xs text-gray-400 text-center">${hour}</div>`;
+        html += `<div class="label num" style="width:22px; margin: 0 1px; text-align:center; font-size:10px; letter-spacing:0;">${hour}</div>`;
     }
     html += '</div>';
-    
+
     // Data rows
     heatMapData.forEach(dayData => {
-        // --- CHANGE HERE: Fix date parsing for Heat Map to avoid UTC issues ---
         const [year, month, day] = dayData.date.split('-').map(Number);
         const date = new Date(year, month - 1, day);
         const dayName = date.toLocaleDateString(undefined, { weekday: 'short' });
         const monthDay = date.getDate();
-        
-        html += `<div class="flex mb-1">`;
-        html += `<div class="w-20 text-xs text-gray-300 font-medium">${dayName} ${monthDay}</div>`;
-        
-        dayData.hours.forEach((minutes, hour) => {
+
+        html += `<div style="display:flex; align-items:center; margin-bottom:2px;">`;
+        html += `<div class="num" style="width:64px; color: var(--ink-2); font-size:11px;">${dayName} ${monthDay}</div>`;
+
+        dayData.hours.forEach((minutes) => {
             const intensity = maxValue > 0 ? minutes / maxValue : 0;
-            let bgColor;
-            
-            if (minutes === 0) {
-                bgColor = 'bg-gray-700';
-            } else if (intensity < 0.3) {
-                bgColor = 'bg-green-600';
-            } else if (intensity < 0.6) {
-                bgColor = 'bg-yellow-500';
-            } else {
-                bgColor = 'bg-red-600';
+            let cls = 'heat-none';
+            if (minutes > 0) {
+                if (intensity < 0.3) cls = 'heat-low';
+                else if (intensity < 0.6) cls = 'heat-med';
+                else cls = 'heat-high';
             }
-            
             const tooltip = minutes > 0 ? `${minutes.toFixed(1)} min` : '0 min';
-            html += `<div class="w-8 h-8 ${bgColor} border border-gray-600 cursor-pointer hover:opacity-80 transition-opacity" title="${tooltip}"></div>`;
+            html += `<div class="heat-cell ${cls}" style="margin: 0 1px;" title="${tooltip}"></div>`;
         });
-        
+
         html += '</div>';
     });
-    
+
     html += '</div>';
-    
-    // Add legend
-    html += '<div class="mt-4 flex items-center justify-center space-x-4 text-xs text-gray-400">';
+
+    // Legend
+    html += '<div style="display:flex; align-items:center; justify-content:center; gap:8px; margin-top:14px; color: var(--ink-3); font-size:11px;">';
     html += '<span>Less</span>';
-    html += '<div class="w-4 h-4 bg-gray-700 border border-gray-600"></div>';
-    html += '<div class="w-4 h-4 bg-green-600 border border-gray-600"></div>';
-    html += '<div class="w-4 h-4 bg-yellow-500 border border-gray-600"></div>';
-    html += '<div class="w-4 h-4 bg-red-600 border border-gray-600"></div>';
+    html += '<div class="heat-cell heat-none" style="width:14px; height:14px;"></div>';
+    html += '<div class="heat-cell heat-low" style="width:14px; height:14px;"></div>';
+    html += '<div class="heat-cell heat-med" style="width:14px; height:14px;"></div>';
+    html += '<div class="heat-cell heat-high" style="width:14px; height:14px;"></div>';
     html += '<span>More</span>';
     html += '</div>';
-    
+
     heatMapContainer.innerHTML = html;
 }
 
@@ -684,6 +719,25 @@ function revertPendingChanges() {
 
 // --- Event Listeners Setup ---
 function setupEventListeners() {
+    // Hosts watchdog: live update + repair button.
+    if (window.electronAPI?.onHostsIntegrityUpdate) {
+        window.electronAPI.onHostsIntegrityUpdate(updateHostsIntegrityBanner);
+    }
+    hostsRepairBtn?.addEventListener('click', async () => {
+        hostsRepairBtn.disabled = true;
+        const prev = hostsRepairBtn.textContent;
+        hostsRepairBtn.textContent = 'Repairing…';
+        try {
+            const res = await window.electronAPI.repairHostsNow();
+            if (!res?.success) console.error('Hosts repair failed:', res?.error);
+        } catch (e) {
+            console.error('Hosts repair threw:', e);
+        } finally {
+            hostsRepairBtn.disabled = false;
+            hostsRepairBtn.textContent = prev;
+        }
+    });
+
     blockedSitesList.addEventListener('change', async (e) => { 
         if (e.target.classList.contains('individual-toggle')) {
             const siteName = e.target.dataset.siteName;
@@ -971,11 +1025,12 @@ async function lockSiteForToday(siteName) {
 function updateMasterStatusText() {
     const total = Object.keys(siteSettings).length;
     const blockedCount = document.querySelectorAll('.individual-toggle:checked').length;
-    statusText.textContent = `${blockedCount} / ${total} SITES BLOCKED`;
-    statusText.className = 'mr-4 text-lg font-bold transition-colors';
-    if (blockedCount === 0) statusText.classList.add('text-green-500');
-    else if (blockedCount === total) statusText.classList.add('text-red-500');
-    else statusText.classList.add('text-yellow-500');
+    statusText.textContent = `${blockedCount} / ${total} sites blocked`;
+    statusText.className = 'num';
+    statusText.style.fontSize = '12px';
+    if (blockedCount === 0)            statusText.style.color = 'var(--good)';
+    else if (blockedCount === total)   statusText.style.color = 'var(--bad)';
+    else                                statusText.style.color = 'var(--warn)';
 }
 
 function showTab(tabName) {
@@ -1041,24 +1096,31 @@ function renderDeepWorkEditor() {
         const checked = selectedSet.has(name) ? 'checked' : '';
         const isSpecial = !!(deepWorkSpecialCache && deepWorkSpecialCache[name]);
         const badge = isSpecial
-            ? '<span class="text-[10px] text-purple-300 bg-purple-900/40 px-1.5 py-0.5 rounded ml-1">extra</span>'
+            ? '<span class="chip chip-accent" style="font-size:10px; padding:0 5px; margin-left:6px;">extra</span>'
             : '';
         const safeName = String(name).replace(/"/g, '&quot;');
         return `
-            <label class="flex items-center gap-3 bg-gray-900/50 border border-gray-700 rounded-lg px-3 py-2 hover:bg-gray-900 cursor-pointer">
-                <input type="checkbox" class="dw-default-site w-4 h-4 accent-cyan-500" data-site-name="${safeName}" ${checked} />
-                <span class="text-sm">${safeName}${badge}</span>
+            <label class="flex items-center gap-2 cursor-pointer"
+                   style="background: var(--bg-2); border: 1px solid var(--line); border-radius:6px; padding: 6px 9px;">
+                <input type="checkbox" class="dw-default-site" style="width:14px; height:14px;" data-site-name="${safeName}" ${checked} />
+                <span style="font-size:12px; color: var(--ink);">${safeName}${badge}</span>
             </label>`;
     }).join('');
 
     chipsContainer.innerHTML = (deepWorkConfigCache.customDomains || []).map(d => {
         const safe = String(d).replace(/"/g, '&quot;');
         return `
-            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-700/40 border border-purple-500/40 text-purple-100 text-xs font-mono">
+            <span class="num"
+                  style="display:inline-flex; align-items:center; gap:6px;
+                         padding: 2px 8px; border-radius: 12px;
+                         background: rgba(94,106,210,0.12);
+                         border: 1px solid rgba(94,106,210,0.35);
+                         color: var(--accent-2); font-size: 11px;">
                 ${safe}
-                <button class="dw-chip-remove text-purple-200 hover:text-white" data-domain="${safe}">&times;</button>
+                <button class="dw-chip-remove" data-domain="${safe}"
+                        style="color: var(--accent-2); background: transparent; border: none; cursor: pointer; font-size:14px; line-height:1; padding:0;">&times;</button>
             </span>`;
-    }).join('') || '<span class="text-xs text-gray-500 italic">No custom domains yet.</span>';
+    }).join('') || '<span style="color: var(--ink-3); font-size:11px; font-style: italic;">No custom domains yet.</span>';
 }
 
 /** Disables the editor + every site toggle on the dashboard while a session is running. */
@@ -1071,7 +1133,9 @@ function syncDeepWorkEditorActiveState(isActive, remainingMs) {
     const endRow = document.getElementById('deep-work-end-early-row');
     const statusPill = document.getElementById('deep-work-status-pill');
 
-    if (card) card.classList.toggle('border-cyan-500/50', isActive);
+    if (card) {
+        card.style.borderColor = isActive ? 'rgba(94,106,210,0.5)' : '';
+    }
 
     if (isActive) {
         activeBanner?.classList.remove('hidden');
@@ -1081,7 +1145,7 @@ function syncDeepWorkEditorActiveState(isActive, remainingMs) {
         endRow?.classList.remove('hidden');
         if (statusPill) {
             statusPill.textContent = 'Session active';
-            statusPill.className = 'text-xs text-cyan-200 bg-cyan-700/40 rounded-full px-3 py-1 font-semibold';
+            statusPill.className = 'chip chip-accent';
         }
     } else {
         activeBanner?.classList.add('hidden');
@@ -1090,7 +1154,7 @@ function syncDeepWorkEditorActiveState(isActive, remainingMs) {
         endRow?.classList.add('hidden');
         if (statusPill) {
             statusPill.textContent = 'Idle — not running';
-            statusPill.className = 'text-xs text-gray-400 bg-gray-700/50 rounded-full px-3 py-1';
+            statusPill.className = 'chip chip-mute';
         }
     }
 
@@ -1114,7 +1178,9 @@ function syncDeepWorkEditorActiveState(isActive, remainingMs) {
         const existing = li.querySelector('.dw-badge');
         if (isActive && !existing) {
             const badge = document.createElement('span');
-            badge.className = 'dw-badge text-[10px] text-cyan-200 bg-cyan-700/40 px-2 py-0.5 rounded ml-2 font-semibold tracking-wide';
+            badge.className = 'dw-badge chip chip-accent';
+            badge.style.marginLeft = '8px';
+            badge.style.fontSize = '10px';
             badge.textContent = 'DEEP WORK';
             const heading = li.querySelector('span.text-lg');
             if (heading) heading.appendChild(badge);

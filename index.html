@@ -1,257 +1,640 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <title>Social Blocker v6</title>
     <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net;"/>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-</head>
-<body class="bg-gradient-to-br from-gray-800 via-gray-900 to-gray-800 text-white font-sans select-none">
 
-    <!-- Deep Work Timer Bar -->
-    <div id="deep-work-banner" class="hidden bg-cyan-600 text-white text-center p-2 font-bold text-lg fixed top-0 left-0 right-0 z-50">
-        <span id="deep-work-timer"></span>
+    <style>
+        /* ===========================================================
+           Linear-inspired design system. Dark, dense, sharp.
+           Every numeric value uses tabular-nums for column alignment.
+           =========================================================== */
+        :root {
+            --bg: #08090a;
+            --bg-2: #0c0d0e;
+            --panel: #0f1011;
+            --panel-2: #131415;
+            --panel-3: #18191b;
+            --line: #1c1d1f;
+            --line-2: #26272a;
+            --ink: #e6e6e6;
+            --ink-2: #9ca0a8;
+            --ink-3: #5b6066;
+            --ink-4: #3f4348;
+            --accent: #5e6ad2;
+            --accent-2: #8b95f8;
+            --good: #4cb782;
+            --warn: #ffb224;
+            --bad:  #eb5757;
+            --grad: linear-gradient(180deg, #5e6ad2 0%, #8b95f8 100%);
+        }
+
+        html, body {
+            background: var(--bg);
+            color: var(--ink);
+            font-family: "Inter", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+            font-size: 13px;
+            -webkit-font-smoothing: antialiased;
+            line-height: 1.5;
+        }
+        body { user-select: none; }
+
+        /* Numeric column alignment everywhere we show minutes/limits/counts. */
+        .num, .font-mono {
+            font-feature-settings: "tnum";
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* Surfaces */
+        .panel    { background: var(--panel);   border: 1px solid var(--line); border-radius: 8px; }
+        .panel-2  { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; }
+        .row      { border-bottom: 1px solid var(--line); }
+        .row:last-child { border-bottom: none; }
+
+        /* Linear-style typography helpers */
+        .label {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--ink-3);
+            font-weight: 600;
+        }
+        .grad-text {
+            background: var(--grad);
+            background-clip: text;
+            -webkit-background-clip: text;
+            color: transparent;
+        }
+
+        /* Compact chips for inline status/badges. */
+        .chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 1px 7px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+        .chip-good { background: rgba(76,183,130,0.12); color: var(--good); }
+        .chip-warn { background: rgba(255,178,36,0.12); color: var(--warn); }
+        .chip-bad  { background: rgba(235,87,87,0.15); color: var(--bad); }
+        .chip-mute { background: var(--line); color: var(--ink-2); }
+        .chip-accent { background: rgba(94,106,210,0.15); color: var(--accent-2); }
+
+        kbd {
+            background: var(--panel-2);
+            border: 1px solid var(--line);
+            border-bottom-width: 2px;
+            border-radius: 4px;
+            padding: 2px 6px;
+            font-size: 11px;
+            font-family: ui-monospace, monospace;
+            color: var(--ink-2);
+        }
+
+        /* Tabs (sharp, no big underlines) */
+        .tab-btn {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--ink-3);
+            padding: 8px 12px;
+            border-radius: 6px;
+            transition: color 0.12s, background-color 0.12s;
+            cursor: pointer;
+            border: 1px solid transparent;
+        }
+        .tab-btn:hover { color: var(--ink); background: var(--panel-2); }
+        .tab-active {
+            color: var(--ink) !important;
+            background: var(--panel-2) !important;
+            border-color: var(--line) !important;
+        }
+        .tab-inactive {
+            color: var(--ink-3);
+        }
+
+        /* Inputs */
+        input[type="number"], input[type="text"], textarea, select {
+            background: var(--bg-2);
+            border: 1px solid var(--line);
+            color: var(--ink);
+            border-radius: 6px;
+            padding: 6px 9px;
+            font-size: 13px;
+            font-family: inherit;
+        }
+        input[type="number"]:focus, input[type="text"]:focus, textarea:focus, select:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 1px var(--accent);
+        }
+        input[type="number"]::-webkit-inner-spin-button { opacity: 1; }
+        input[type="checkbox"] { accent-color: var(--accent); }
+
+        /* Buttons */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            padding: 6px 11px;
+            font-size: 13px;
+            font-weight: 500;
+            border-radius: 6px;
+            background: var(--panel-2);
+            color: var(--ink);
+            border: 1px solid var(--line);
+            transition: background-color 0.12s, border-color 0.12s, color 0.12s;
+            cursor: pointer;
+        }
+        .btn:hover { background: var(--panel-3); border-color: var(--line-2); }
+        .btn-primary {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: white;
+        }
+        .btn-primary:hover { background: #4e58b8; border-color: #4e58b8; }
+        .btn-primary:disabled, .btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+        .btn-danger {
+            background: rgba(235,87,87,0.12);
+            border-color: rgba(235,87,87,0.3);
+            color: var(--bad);
+        }
+        .btn-danger:hover { background: rgba(235,87,87,0.2); border-color: var(--bad); }
+        .btn-warn {
+            background: rgba(255,178,36,0.12);
+            border-color: rgba(255,178,36,0.3);
+            color: var(--warn);
+        }
+        .btn-warn:hover { background: rgba(255,178,36,0.2); border-color: var(--warn); }
+        .btn-ghost { background: transparent; }
+        .btn-ghost:hover { background: var(--panel-2); }
+
+        /* Pill toggle — replaces the old gray rect toggle. Linear-flavoured. */
+        .ls-switch-wrap { position: relative; display: inline-flex; align-items: center; }
+        .ls-switch-track {
+            width: 30px;
+            height: 17px;
+            background: var(--line);
+            border-radius: 9999px;
+            position: relative;
+            transition: background-color 0.15s;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+        .ls-switch-track::after {
+            content: "";
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 13px;
+            height: 13px;
+            background: var(--ink-2);
+            border-radius: 9999px;
+            transition: transform 0.15s, background-color 0.15s;
+        }
+        /* Legacy toggle wrapper still emitted by renderer.js — drive it via the inner peer checkbox. */
+        input.individual-toggle:checked ~ .toggle-bg {
+            background: var(--accent) !important;
+        }
+        input.individual-toggle:checked ~ .toggle-dot {
+            transform: translateX(13px);
+            background: white !important;
+        }
+        input.individual-toggle ~ .toggle-bg {
+            width: 30px; height: 17px;
+            background: var(--line);
+            border-radius: 9999px;
+            transition: background-color 0.15s;
+        }
+        input.individual-toggle ~ .toggle-dot {
+            top: 2px; left: 2px;
+            width: 13px; height: 13px;
+            background: var(--ink-2);
+            border-radius: 9999px;
+            transition: transform 0.15s, background-color 0.15s;
+            position: absolute;
+        }
+        input.individual-toggle:disabled ~ .toggle-bg { background: var(--line); opacity: 0.5; }
+        input.individual-toggle:disabled ~ .toggle-dot { background: var(--ink-4); opacity: 0.6; }
+
+        /* Limit input inside site rows (smaller, inline). */
+        .limit-input {
+            width: 46px !important;
+            text-align: center;
+            padding: 2px 6px !important;
+            font-size: 12px !important;
+            background: var(--bg-2) !important;
+        }
+
+        /* Status dot prefix on each site row */
+        .site-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 9999px;
+            flex-shrink: 0;
+        }
+
+        /* Sticky banners stacked at top */
+        .top-banner {
+            position: fixed;
+            left: 0;
+            right: 0;
+            padding: 6px 16px;
+            font-size: 12px;
+            font-weight: 500;
+            z-index: 40;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+        }
+
+        /* Heatmap cells (Data tab) */
+        .heat-cell {
+            width: 22px;
+            height: 22px;
+            border: 1px solid var(--line);
+            border-radius: 3px;
+            cursor: pointer;
+            transition: opacity 0.12s, transform 0.12s;
+        }
+        .heat-cell:hover { opacity: 0.7; transform: scale(1.1); }
+        .heat-none  { background: var(--panel); }
+        .heat-low   { background: rgba(94,106,210,0.35); }
+        .heat-med   { background: rgba(255,178,36,0.55); }
+        .heat-high  { background: rgba(235,87,87,0.75); }
+
+        /* Modal */
+        #commitment-modal {
+            position: fixed; inset: 0;
+            background: rgba(0,0,0,0.75);
+            backdrop-filter: blur(4px);
+            z-index: 60;
+            display: flex; align-items: center; justify-content: center;
+        }
+        #commitment-modal.hidden { display: none; }
+        #commitment-modal #modal-content {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            padding: 26px;
+            max-width: 560px;
+            width: 90%;
+            transform: scale(0.96);
+            opacity: 0;
+            transition: transform 0.15s, opacity 0.15s;
+        }
+        #commitment-modal:not(.hidden) #modal-content {
+            transform: scale(1);
+            opacity: 1;
+        }
+
+        /* Tab content fade */
+        .tab-content { animation: fadeIn 0.15s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: var(--bg); }
+        ::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--ink-4); }
+
+        /* Hide spinner arrows in number inputs on Firefox */
+        input[type=number] { -moz-appearance: textfield; appearance: textfield; }
+    </style>
+</head>
+<body>
+
+    <!-- ============================================================
+         TOP-STACKED BANNERS
+         Each one is fixed-position; renderer.js maintains the stacking
+         order via syncBannerStackPlacement() (deep work first, then
+         hosts integrity, then pending changes).
+         ============================================================ -->
+
+    <!-- Deep Work session banner -->
+    <div id="deep-work-banner"
+         class="top-banner hidden"
+         style="top: 0; background: var(--accent); color: white;">
+        <span id="deep-work-timer" class="num"></span>
     </div>
 
-    <div class="container mx-auto p-12 max-w-5xl min-h-screen pt-20">
-        <header class="text-center mb-12">
-            <h1 class="text-5xl font-bold text-cyan-400 mb-4">Social Blocker v6</h1>
-            <p class="text-gray-300 text-lg">Set your limits. Reclaim your time.</p>
+    <!-- Hosts integrity / repair banner (was missing in old HTML; renderer.js refs it) -->
+    <div id="hosts-integrity-banner"
+         class="top-banner hidden"
+         style="top: 0; background: rgba(255,178,36,0.12); border-bottom: 1px solid var(--warn); color: var(--warn);">
+        <span id="hosts-integrity-text">Hosts file out of sync with the app.</span>
+        <button id="hosts-repair-btn" class="btn btn-warn" style="padding: 3px 10px;">Repair now</button>
+    </div>
+
+    <!-- Pending changes (Save & Apply) banner -->
+    <div id="pending-changes-banner"
+         class="top-banner hidden"
+         style="top: 0; background: rgba(94,106,210,0.12); border-bottom: 1px solid var(--accent); color: var(--accent-2);">
+        <span id="pending-changes-text" class="num">You have unsaved changes</span>
+        <span class="flex items-center gap-2">
+            <button id="revert-changes-btn" class="btn btn-ghost" style="padding: 3px 10px;">Revert</button>
+            <button id="apply-changes-btn" class="btn btn-primary" style="padding: 3px 10px;">Save &amp; Apply <kbd style="margin-left:6px;">Ctrl S</kbd></button>
+        </span>
+    </div>
+
+    <!-- ============================================================
+         MAIN CONTAINER
+         ============================================================ -->
+    <div class="max-w-5xl mx-auto px-8 py-6" style="padding-top: 56px;">
+
+        <!-- Header: brand + path + tabs -->
+        <header class="flex items-center justify-between mb-6">
+            <div class="flex items-center gap-3">
+                <div class="w-6 h-6 rounded" style="background: var(--grad);"></div>
+                <span class="font-semibold" style="font-size:14px;">FocusGuard</span>
+                <span style="color: var(--ink-3);">/</span>
+                <span style="color: var(--ink-2);">v6 dashboard</span>
+            </div>
+            <nav class="flex items-center gap-1" aria-label="Tabs">
+                <button id="tab-dashboard" class="tab-btn tab-active">Dashboard</button>
+                <button id="tab-history"   class="tab-btn tab-inactive">History</button>
+                <button id="tab-data"      class="tab-btn tab-inactive">Data</button>
+            </nav>
         </header>
 
-        <!-- Tab Navigation -->
-        <div class="mb-12">
-            <div class="border-b border-gray-600">
-                <nav class="-mb-px flex space-x-12" aria-label="Tabs">
-                    <button id="tab-dashboard" class="tab-btn">Dashboard</button>
-                    <button id="tab-history" class="tab-btn">History</button>
-                    <button id="tab-data" class="tab-btn">Data</button>
-                </nav>
-            </div>
-        </div>
-
         <main>
-            <!-- Dashboard Content -->
+
+            <!-- ====================================================
+                 DASHBOARD TAB
+                 ==================================================== -->
             <div id="content-dashboard" class="tab-content">
-                <!-- Master Status, Website Controls, etc. -->
-                <div class="bg-gray-800/80 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-700/50 p-8 mb-10 flex items-center justify-between">
-                     <div class="flex items-center">
-                         <svg class="w-8 h-8 text-cyan-400 mr-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
-                        <span class="text-xl font-semibold">Master Blocker Status</span>
+
+                <!-- Pending changes preview (shows what Apply will do) -->
+                <div id="pending-changes-preview" class="panel mb-4 hidden p-4">
+                    <p class="label mb-2">Pending changes</p>
+                    <div id="will-block-list" class="text-xs mb-1" style="color: var(--bad);">
+                        Will block: <span id="will-block-sites" class="num"></span>
                     </div>
-                     <div class="flex items-center">
-                        <span id="status-indicator" class="mr-4 text-sm font-semibold opacity-0 transition-opacity">(Saving...)</span>
-                        <span id="blocker-status-text" class="mr-4 text-lg font-bold"></span>
+                    <div id="will-unblock-list" class="text-xs" style="color: var(--good);">
+                        Will unblock: <span id="will-unblock-sites" class="num"></span>
                     </div>
                 </div>
 
-                <div class="bg-gray-800/80 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-700/50 p-8 mb-10">
-                    <h2 class="text-3xl font-semibold mb-6 border-b border-gray-600 pb-3">Website Controls</h2>
-                    <ul id="blocked-sites-list" class="space-y-6"></ul>
-                </div>
-
-                 <div id="deep-work-card" class="bg-gray-800/80 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-700/50 p-8 relative">
-                    <div id="deep-work-active-banner" class="hidden absolute -top-px left-0 right-0 bg-cyan-600 text-white text-center py-2 font-bold tracking-wide text-sm rounded-t-xl">
-                        DEEP WORK IN PROGRESS &mdash; <span id="deep-work-inline-timer">0m</span> remaining
+                <!-- Master + status strip -->
+                <section class="panel mb-4 px-4 py-3 flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                        <span class="w-2 h-2 rounded-full" style="background: var(--good);"></span>
+                        <span class="font-semibold" style="font-size:14px;">Master Blocker</span>
+                        <span class="num" id="blocker-status-text" style="color: var(--ink-2); font-size: 12px;">0 / 0 sites blocked</span>
                     </div>
-                    <div class="flex items-center justify-between mb-6">
-                        <h2 class="text-3xl font-semibold">Deep Work</h2>
-                        <span id="deep-work-status-pill" class="text-xs text-gray-400 bg-gray-700/50 rounded-full px-3 py-1">Idle &mdash; not running</span>
-                    </div>
-                    <p class="text-gray-300 mb-6 text-sm">Pick the sites you want locked, set a duration, and start. The blocks lift automatically when the timer ends.</p>
+                    <span id="status-indicator"
+                          class="opacity-0 transition-opacity text-xs num"
+                          style="color: var(--ink-3);">(Saving...)</span>
+                </section>
 
-                    <!-- Start row: duration + button -->
-                    <div id="deep-work-start-row" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                        <div class="md:col-span-2 grid grid-cols-2 gap-3">
-                            <div>
-                                <input type="number" id="deep-work-hours" min="0" max="8" value="1" step="1" class="bg-gray-700/80 border border-gray-600 text-white text-sm rounded-lg focus:ring-cyan-500 focus:border-cyan-500 block w-full p-3 text-center">
-                                <span class="block text-xs text-gray-400 mt-1 text-center">hrs</span>
+                <!-- ============================================
+                     SITE LIST PANEL
+                     Linear-style table. The renderer dynamically
+                     appends <li> rows into #blocked-sites-list.
+                     Header row below is static; renderer rows
+                     align by inline width helpers.
+                     ============================================ -->
+                <section class="panel mb-4">
+                    <div class="row px-4 py-2 flex items-center" style="background: var(--panel-2);">
+                        <span class="label flex-1">Site</span>
+                        <span class="label" style="width:96px;">Used</span>
+                        <span class="label" style="width:60px;">Limit</span>
+                        <span class="label" style="width:100px;">Progress</span>
+                        <span class="label" style="width:120px;">Status</span>
+                        <span class="label text-center" style="width:60px;">Block</span>
+                    </div>
+                    <ul id="blocked-sites-list" class="list-none"></ul>
+                </section>
+
+                <!-- ============================================
+                     DEEP WORK PANEL
+                     ============================================ -->
+                <section id="deep-work-card" class="panel relative overflow-hidden mb-4">
+
+                    <!-- Active banner shown only during session -->
+                    <div id="deep-work-active-banner"
+                         class="hidden absolute top-0 left-0 right-0 px-4 py-1.5 text-xs font-semibold tracking-wide"
+                         style="background: var(--accent); color: white;">
+                        DEEP WORK IN PROGRESS &mdash; <span id="deep-work-inline-timer" class="num">0m</span> remaining
+                    </div>
+
+                    <div class="p-4">
+                        <div class="flex items-center justify-between mb-3">
+                            <h2 class="font-semibold" style="font-size:14px;">Deep Work</h2>
+                            <span id="deep-work-status-pill" class="chip chip-mute">Idle &mdash; not running</span>
+                        </div>
+                        <p style="color: var(--ink-2); font-size:12px;" class="mb-4">
+                            Pick the sites you want locked, set a duration, and start. The blocks lift automatically when the timer ends.
+                        </p>
+
+                        <!-- Start row (duration + start button) -->
+                        <div id="deep-work-start-row" class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+                            <div class="md:col-span-2 grid grid-cols-2 gap-2">
+                                <div>
+                                    <input type="number" id="deep-work-hours" min="0" max="8" value="1" step="1" class="w-full text-center num">
+                                    <span class="label block mt-1 text-center">hrs</span>
+                                </div>
+                                <div>
+                                    <input type="number" id="deep-work-minutes" min="0" max="59" value="0" step="1" class="w-full text-center num">
+                                    <span class="label block mt-1 text-center">min</span>
+                                </div>
                             </div>
-                            <div>
-                                <input type="number" id="deep-work-minutes" min="0" max="59" value="0" step="1" class="bg-gray-700/80 border border-gray-600 text-white text-sm rounded-lg focus:ring-cyan-500 focus:border-cyan-500 block w-full p-3 text-center">
-                                <span class="block text-xs text-gray-400 mt-1 text-center">min</span>
+                            <button id="deep-work-btn" class="btn btn-primary">Start Deep Work</button>
+                        </div>
+
+                        <!-- Editor: defaults + custom domains -->
+                        <div id="deep-work-editor-section">
+                            <p class="label mb-2">Block list</p>
+                            <div id="deep-work-default-sites" class="grid grid-cols-2 md:grid-cols-3 gap-2 mb-4">
+                                <!-- Populated by renderer -->
+                            </div>
+
+                            <p class="label mb-2">Custom domains</p>
+                            <div id="deep-work-custom-chips" class="flex flex-wrap gap-2 mb-2 min-h-[1.5rem]">
+                                <!-- Populated by renderer -->
+                            </div>
+                            <div class="flex gap-2">
+                                <input type="text" id="deep-work-custom-input"
+                                       placeholder="add a domain (e.g. news.ycombinator.com)"
+                                       class="flex-1">
+                                <button id="deep-work-custom-add-btn" class="btn">Add</button>
+                            </div>
+                            <p class="mt-2" style="color: var(--ink-3); font-size: 11px;">
+                                Custom domains are blocked in addition to checked defaults whenever Deep Work runs.
+                            </p>
+                        </div>
+
+                        <!-- End-early control (visible only during active session) -->
+                        <div id="deep-work-end-early-row" class="hidden mt-4 flex justify-end">
+                            <button id="deep-work-end-early-btn" class="btn btn-ghost" style="color: var(--bad); padding: 4px 10px;">End session early</button>
+                        </div>
+
+                        <!-- Emergency Override (Nuclear) -->
+                        <div class="mt-5 pt-4" style="border-top: 1px solid var(--line);">
+                            <div class="flex items-center justify-between gap-4">
+                                <div>
+                                    <h3 class="font-semibold" style="font-size:13px; color: var(--bad);">Emergency Override</h3>
+                                    <p style="color: var(--ink-3); font-size: 11px;" class="mt-0.5">
+                                        Immediately blocks every site on your tracker list. Lifts at midnight.
+                                    </p>
+                                </div>
+                                <button id="nuclear-option-btn" class="btn btn-danger whitespace-nowrap">Nuclear Option</button>
                             </div>
                         </div>
-                        <button id="deep-work-btn" class="bg-cyan-600 hover:bg-cyan-700 font-bold py-3 px-6 rounded-lg transition-colors shadow-lg disabled:bg-gray-600 disabled:cursor-not-allowed">Start Deep Work</button>
                     </div>
+                </section>
 
-                    <!-- Default sites checklist -->
-                    <div id="deep-work-editor-section">
-                        <h3 class="text-xs uppercase tracking-wider text-cyan-400 mb-3 font-semibold">Block list</h3>
-                        <div id="deep-work-default-sites" class="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
-                            <!-- Populated by renderer -->
-                        </div>
-
-                        <h3 class="text-xs uppercase tracking-wider text-cyan-400 mb-3 font-semibold">Custom domains</h3>
-                        <div id="deep-work-custom-chips" class="flex flex-wrap gap-2 mb-3 min-h-[2rem]">
-                            <!-- Populated by renderer -->
-                        </div>
-                        <div class="flex gap-2 mb-1">
-                            <input type="text" id="deep-work-custom-input" placeholder="add a domain (e.g. news.ycombinator.com)" class="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm placeholder-gray-500" />
-                            <button id="deep-work-custom-add-btn" class="bg-purple-600 hover:bg-purple-500 text-white font-semibold px-4 rounded-lg text-sm">Add</button>
-                        </div>
-                        <p class="text-[11px] text-gray-500">Custom domains are blocked in addition to checked defaults whenever Deep Work runs.</p>
-                    </div>
-
-                    <!-- End-early control (only visible during active session) -->
-                    <div id="deep-work-end-early-row" class="hidden mt-6 flex justify-end">
-                        <button id="deep-work-end-early-btn" class="text-sm text-gray-400 hover:text-red-300 underline">End session early</button>
-                    </div>
-
-                    <!-- Emergency Override (Nuclear) -->
-                    <div class="border-t border-gray-700 mt-6 pt-6">
-                        <div class="flex items-center justify-between gap-4">
-                            <div>
-                                <h3 class="text-sm font-semibold text-red-400">Emergency Override</h3>
-                                <p class="text-xs text-gray-400 mt-1">Immediately block every site on your tracker list. Lifts at midnight.</p>
-                            </div>
-                            <button id="nuclear-option-btn" class="bg-red-600 hover:bg-red-700 font-bold py-3 px-6 rounded-lg transition-colors shadow-lg whitespace-nowrap">Nuclear Option</button>
-                        </div>
-                    </div>
-                </div>
+                <!-- Footer hint -->
+                <footer class="flex items-center justify-between text-xs mt-6 mb-2" style="color: var(--ink-3);">
+                    <span>Tap any toggle to queue a change &middot; <kbd>Ctrl</kbd> + <kbd>S</kbd> to apply</span>
+                    <span>v1.2.0 &middot; <span class="grad-text font-semibold">unsigned dev build</span></span>
+                </footer>
             </div>
 
-            <!-- History Content -->
+            <!-- ====================================================
+                 HISTORY TAB
+                 ==================================================== -->
             <div id="content-history" class="tab-content hidden">
-                <!-- Overall Blocker Activity -->
-                <div class="bg-gray-800/80 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-700/50 p-8 mb-10">
-                    <h2 class="text-3xl font-semibold mb-2">Blocker Activity (Last 7 Days)</h2>
-                    <p class="text-gray-400 mb-6">Shows the number of times you manually enabled the blocker each day.</p>
-                    <canvas id="history-chart"></canvas>
-                </div>
 
-                <!-- Site-Specific Activity Table -->
-                <div class="bg-gray-800/80 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-700/50 p-8 mb-10">
-                    <h2 class="text-3xl font-semibold mb-2">Unblocked Sites Today</h2>
-                    <p class="text-gray-400 mb-6">Sites you've manually unblocked today - your distraction patterns revealed.</p>
+                <section class="panel p-5 mb-4">
+                    <p class="label mb-1">Blocker activity</p>
+                    <h2 class="font-semibold mb-1" style="font-size: 15px;">Blocker activity, last 7 days</h2>
+                    <p style="color: var(--ink-3); font-size: 12px;" class="mb-4">
+                        Number of times you manually enabled the blocker each day.
+                    </p>
+                    <canvas id="history-chart" height="120"></canvas>
+                </section>
+
+                <section class="panel p-5 mb-4">
+                    <p class="label mb-1">Today&rsquo;s unblock log</p>
+                    <h2 class="font-semibold mb-1" style="font-size: 15px;">Sites you unblocked today</h2>
+                    <p style="color: var(--ink-3); font-size: 12px;" class="mb-4">
+                        Each row is a site you opted to keep open. Use this to spot patterns.
+                    </p>
                     <div id="unblocks-table-container"></div>
-                </div>
+                </section>
 
-                <!-- Unblock Events Chart -->
-                <div class="bg-gray-800/80 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-700/50 p-8 mb-10">
-                    <h2 class="text-3xl font-semibold mb-2">Unblock Events by Site</h2>
-                    <p class="text-gray-400 mb-6">How many times you unblocked each site today.</p>
-                    <div id="unblocks-chart-container">
-                        <canvas id="unblocks-chart"></canvas>
+                <section class="panel p-5 mb-4">
+                    <p class="label mb-1">Unblock events by site</p>
+                    <h2 class="font-semibold mb-1" style="font-size: 15px;">How many times you unblocked each site today</h2>
+                    <div id="unblocks-chart-container" class="mt-3">
+                        <canvas id="unblocks-chart" height="120"></canvas>
                     </div>
-                </div>
+                </section>
 
-                <!-- Usage Chart -->
-                <div class="bg-gray-800/80 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-700/50 p-8">
-                    <h2 class="text-3xl font-semibold mb-2">Time Spent by Site</h2>
-                    <p class="text-gray-400 mb-6">Total time spent on each site today.</p>
-                    <canvas id="usage-chart"></canvas>
-                </div>
+                <section class="panel p-5">
+                    <p class="label mb-1">Time spent</p>
+                    <h2 class="font-semibold mb-1" style="font-size: 15px;">Time spent by site, today</h2>
+                    <canvas id="usage-chart" height="120" class="mt-3"></canvas>
+                </section>
             </div>
 
-            <!-- Data Content -->
+            <!-- ====================================================
+                 DATA TAB
+                 ==================================================== -->
             <div id="content-data" class="tab-content hidden">
-                <!-- Distraction Heat Map -->
-                <div class="bg-gray-800/80 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-700/50 p-8 mb-10">
-                    <h2 class="text-3xl font-semibold mb-6">Distraction Heat Map</h2>
-                    <p class="text-gray-300 mb-6 text-lg">Visual representation of when you're most likely to get distracted throughout the day</p>
-                    <div class="mb-6">
-                        <label for="heat-map-days" class="block text-sm font-medium text-gray-300 mb-3">Days to show:</label>
-                        <select id="heat-map-days" class="bg-gray-700/80 border border-gray-600 text-white text-sm rounded-lg focus:ring-cyan-500 focus:border-cyan-500 p-3">
-                            <option value="7">Last 7 Days</option>
-                            <option value="14">Last 14 Days</option>
-                            <option value="30">Last 30 Days</option>
+
+                <!-- Heat Map -->
+                <section class="panel p-5 mb-4">
+                    <p class="label mb-1">Distraction pattern</p>
+                    <h2 class="font-semibold mb-1" style="font-size: 15px;">Heat map &mdash; when you get distracted</h2>
+                    <p style="color: var(--ink-3); font-size: 12px;" class="mb-4">
+                        Each cell is one hour. Darker indigo = light use, amber = moderate, red = heavy.
+                    </p>
+
+                    <div class="flex items-center gap-3 mb-4">
+                        <label for="heat-map-days" class="label" style="margin: 0;">Range</label>
+                        <select id="heat-map-days" class="num">
+                            <option value="7">Last 7 days</option>
+                            <option value="14">Last 14 days</option>
+                            <option value="30">Last 30 days</option>
                         </select>
                     </div>
                     <div class="overflow-x-auto">
-                        <div id="heat-map-container" class="min-w-full">
-                            <!-- Heat map will be generated here -->
-                        </div>
+                        <div id="heat-map-container" class="min-w-full"></div>
                     </div>
-                </div>
+                </section>
 
                 <!-- Reports / Digest -->
-                <div class="bg-gray-800/80 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-700/50 p-8 mb-10">
-                    <h2 class="text-3xl font-semibold mb-2">Weekly / Monthly Reports</h2>
-                    <p class="text-gray-300 mb-6 text-lg">Self-contained HTML digests saved locally to your Google Drive folder. No email, no network &mdash; the file just opens in your browser.</p>
+                <section class="panel p-5">
+                    <p class="label mb-1">Local digests</p>
+                    <h2 class="font-semibold mb-1" style="font-size: 15px;">Weekly &amp; monthly reports</h2>
+                    <p style="color: var(--ink-3); font-size: 12px;" class="mb-4">
+                        Self-contained HTML digests saved to your Google Drive folder. No email, no network &mdash; the file just opens in your browser.
+                    </p>
 
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                        <div class="bg-gray-900/60 border border-gray-700 rounded-lg p-5">
-                            <p class="text-xs uppercase tracking-wider text-cyan-400 mb-2 font-semibold">Save location</p>
-                            <p id="report-folder-display" class="font-mono text-sm text-gray-200 break-all">&mdash;</p>
-                            <p id="report-folder-hint" class="text-xs text-gray-500 mt-2">Folder will be created on first run if it doesn't exist yet.</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+                        <div class="panel-2 p-4">
+                            <p class="label mb-2">Save location</p>
+                            <p id="report-folder-display" class="font-mono break-all" style="font-size: 12px; color: var(--ink);">&mdash;</p>
+                            <p id="report-folder-hint" style="color: var(--ink-3); font-size: 11px;" class="mt-2">
+                                Folder will be created on first run if it doesn&rsquo;t exist yet.
+                            </p>
                             <div class="flex gap-2 mt-3">
-                                <button id="open-report-folder-btn" class="text-xs bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded">Open folder</button>
-                                <button id="edit-report-folder-btn" class="text-xs bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded">Change&hellip;</button>
+                                <button id="open-report-folder-btn" class="btn" style="padding: 4px 10px; font-size: 12px;">Open folder</button>
+                                <button id="edit-report-folder-btn" class="btn" style="padding: 4px 10px; font-size: 12px;">Change&hellip;</button>
                             </div>
                         </div>
-                        <div class="bg-gray-900/60 border border-gray-700 rounded-lg p-5">
-                            <p class="text-xs uppercase tracking-wider text-cyan-400 mb-2 font-semibold">Auto-generation schedule</p>
-                            <label class="flex items-center gap-3 text-sm mb-2 cursor-pointer">
-                                <input type="checkbox" id="report-weekly-toggle" class="w-4 h-4 accent-cyan-500" />
-                                <span>Weekly &mdash; every Monday at 9 a.m.</span>
+                        <div class="panel-2 p-4">
+                            <p class="label mb-2">Auto-generation schedule</p>
+                            <label class="flex items-center gap-2 mb-1.5 cursor-pointer" style="font-size: 12px;">
+                                <input type="checkbox" id="report-weekly-toggle" class="w-3.5 h-3.5">
+                                Weekly &mdash; every Monday at 9 a.m.
                             </label>
-                            <label class="flex items-center gap-3 text-sm mb-2 cursor-pointer">
-                                <input type="checkbox" id="report-monthly-toggle" class="w-4 h-4 accent-cyan-500" />
-                                <span>Monthly &mdash; 1st of each month at 9 a.m.</span>
+                            <label class="flex items-center gap-2 mb-1.5 cursor-pointer" style="font-size: 12px;">
+                                <input type="checkbox" id="report-monthly-toggle" class="w-3.5 h-3.5">
+                                Monthly &mdash; 1st of each month at 9 a.m.
                             </label>
-                            <label class="flex items-center gap-3 text-sm cursor-pointer">
-                                <input type="checkbox" id="report-autoopen-toggle" class="w-4 h-4 accent-cyan-500" />
-                                <span>Auto-open the file when generated</span>
+                            <label class="flex items-center gap-2 cursor-pointer" style="font-size: 12px;">
+                                <input type="checkbox" id="report-autoopen-toggle" class="w-3.5 h-3.5">
+                                Auto-open the file when generated
                             </label>
                         </div>
                     </div>
 
-                    <div class="flex flex-wrap gap-3 mb-4">
-                        <button id="generate-weekly-now-btn" class="bg-cyan-600 hover:bg-cyan-500 text-white font-semibold px-5 py-2.5 rounded-lg shadow">Generate last week's digest now</button>
-                        <button id="generate-monthly-now-btn" class="bg-purple-600 hover:bg-purple-500 text-white font-semibold px-5 py-2.5 rounded-lg shadow">Generate last month's digest now</button>
+                    <div class="flex flex-wrap gap-2 mb-3">
+                        <button id="generate-weekly-now-btn" class="btn btn-primary">Generate last week&rsquo;s digest</button>
+                        <button id="generate-monthly-now-btn" class="btn">Generate last month&rsquo;s digest</button>
                     </div>
-                    <div id="report-status" class="text-sm text-gray-400 min-h-[1.5rem]"></div>
-                    <div class="text-xs text-gray-500 mt-3">
-                        Last weekly: <span id="report-last-weekly">&mdash;</span> &middot;
-                        Last monthly: <span id="report-last-monthly">&mdash;</span>
+                    <div id="report-status" style="font-size: 12px; min-height: 1.5rem; color: var(--ink-3);"></div>
+                    <div style="color: var(--ink-3); font-size: 11px;" class="mt-2 num">
+                        Last weekly: <span id="report-last-weekly">&mdash;</span>
+                        &middot; Last monthly: <span id="report-last-monthly">&mdash;</span>
                     </div>
-                </div>
-
-                <!-- --- CHANGE HERE: Removed the confusing Limit Adherence chart --- -->
-                <!-- Limit Adherence Rate (REMOVED) -->
-                <!-- <div class="bg-gray-800/80 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-700/50 p-8">
-                    <h2 class="text-3xl font-semibold mb-6">Limit Adherence Rate</h2>
-                    <p class="text-gray-300 mb-6 text-lg">Percentage showing how many sites stayed within their limits each day</p>
-                    <div class="mb-6">
-                        <label for="adherence-days" class="block text-sm font-medium text-gray-300 mb-3">Days to show:</label>
-                        <select id="adherence-days" class="bg-gray-700/80 border border-gray-600 text-white text-sm rounded-lg focus:ring-cyan-500 focus:border-cyan-500 p-3">
-                            <option value="7">Last 7 Days</option>
-                            <option value="14">Last 14 Days</option>
-                            <option value="30">Last 30 Days</option>
-                        </select>
-                    </div>
-                    <canvas id="adherence-chart"></canvas>
-                </div> -->
+                </section>
             </div>
         </main>
     </div>
 
-    <!-- Commitment Modal -->
-    <div id="commitment-modal" class="fixed inset-0 bg-black bg-opacity-80 backdrop-blur-sm flex items-center justify-center hidden z-50">
-        <div class="bg-gray-800/95 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-700/50 p-10 max-w-lg w-full transform transition-all scale-95 opacity-0" id="modal-content">
-            <h2 class="text-3xl font-bold mb-6 text-yellow-400">Commitment Required</h2>
-            <p class="text-gray-300 mb-6 text-lg">To increase this time limit, you must demonstrate your commitment to focus. Please type the following paragraph exactly as it appears. The backspace key is disabled.</p>
-            <p id="commitment-paragraph" class="text-gray-400 italic bg-gray-900/80 p-6 rounded-lg mb-6 select-all border border-gray-700"></p>
-            <textarea id="commitment-input" rows="6" class="w-full bg-gray-900/80 text-white rounded-lg p-4 focus:outline-none focus:ring-2 focus:ring-cyan-500 border border-gray-700"></textarea>
-            <div class="flex justify-end space-x-6 mt-8">
-                <button id="cancel-commitment-btn" class="px-8 py-3 bg-gray-600 hover:bg-gray-700 rounded-lg transition-colors shadow-lg">Cancel</button>
-                <button id="confirm-commitment-btn" class="px-8 py-3 bg-green-600 hover:bg-green-700 rounded-lg transition-colors disabled:bg-gray-700 disabled:cursor-not-allowed shadow-lg" disabled>Confirm</button>
+    <!-- ====================================================
+         COMMITMENT MODAL
+         ==================================================== -->
+    <div id="commitment-modal" class="hidden">
+        <div id="modal-content">
+            <h2 class="font-semibold mb-3" style="font-size: 16px; color: var(--warn);">Commitment required</h2>
+            <p style="color: var(--ink-2); font-size: 13px;" class="mb-4">
+                To increase this time limit, you must demonstrate your commitment. Please type the following paragraph exactly as it appears. The backspace key is disabled.
+            </p>
+            <p id="commitment-paragraph"
+               class="panel-2 p-4 mb-4 italic"
+               style="color: var(--ink-2); font-size: 13px; line-height: 1.55; user-select: all;"></p>
+            <textarea id="commitment-input" rows="6" class="w-full mb-4" style="font-family: inherit; line-height: 1.55;"></textarea>
+            <div class="flex justify-end gap-2">
+                <button id="cancel-commitment-btn" class="btn">Cancel</button>
+                <button id="confirm-commitment-btn" class="btn btn-primary" disabled>Confirm</button>
             </div>
         </div>
     </div>
 
-    <style>
-        .tab-btn { @apply whitespace-nowrap py-5 px-2 border-b-2 font-medium text-xl transition-all duration-200; }
-        .tab-active { @apply border-cyan-400 text-cyan-300 font-semibold; }
-        .tab-inactive { @apply border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-400 hover:bg-gray-800/30 rounded-t-lg; }
-        .toggle-bg{background-color:#4A5568}.toggle-dot{background-color:white;transform:translateX(0);transition:transform .3s ease-in-out,background-color .3s ease-in-out}input:checked~.toggle-bg{background-color:#D32F2F}input:checked~.toggle-dot{transform:translateX(1.5rem);background-color:#F87171}input:not(:checked)~.toggle-bg{background-color:#22C55E}input:not(:checked)~.toggle-dot{background-color:#86EFAC}input:disabled~.toggle-bg{background-color:#374151;cursor:not-allowed}input:disabled~.toggle-dot{background-color:#6B7280}
-        #commitment-modal.hidden { display: none; }
-        #commitment-modal:not(.hidden) #modal-content { transform: scale(1); opacity: 1; }
-    </style>
-
     <script src="renderer.js"></script>
 </body>
 </html>
-
