@@ -50,7 +50,7 @@
         "provider": "github",
         "owner": "JRKagumba",
         "repo": "social-blocker-v6",
-        "private": true,
+        "private": false,
         "releaseType": "release"
       }
     ]
