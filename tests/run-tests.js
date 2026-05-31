@@ -439,7 +439,137 @@ group('DataManager.hudConfig defaults + round-trip', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 5) Summary
+// 5) DataManager.deepWorkSchedule CRUD + scheduler predicates
+// ---------------------------------------------------------------------------
+group('DataManager.deepWorkSchedule CRUD', () => {
+    const DataManager = require('../dataManager');
+    const dm = new DataManager();
+
+    // Should start empty (clean store after each `new DataManager()`).
+    dm.store.set('deepWorkSchedule', []);
+    ok('initial schedule is empty array', Array.isArray(dm.getDeepWorkSchedule()) && dm.getDeepWorkSchedule().length === 0);
+
+    const after1 = dm.addScheduleRule({
+        name: 'Morning focus', days: [1, 2, 3, 4, 5],
+        startTime: '09:00', durationMinutes: 180
+    });
+    ok('add returns array of 1', after1.length === 1, after1);
+    ok('added rule has UUID-shaped id', typeof after1[0].id === 'string' && after1[0].id.length >= 8);
+    ok('added rule is enabled by default', after1[0].enabled === true);
+    ok('added rule preserves name', after1[0].name === 'Morning focus');
+
+    const after2 = dm.addScheduleRule({
+        name: 'Weekend deep work', days: [0, 6],
+        startTime: '14:30', durationMinutes: 120, enabled: false
+    });
+    ok('second add yields 2 rules', after2.length === 2);
+    ok('explicit enabled:false respected', after2[1].enabled === false);
+
+    const id1 = after2[0].id;
+    const after3 = dm.updateScheduleRule(id1, { name: 'Renamed', durationMinutes: 60 });
+    const updated = after3.find(r => r.id === id1);
+    ok('update preserves id', updated.id === id1);
+    ok('update applies new name', updated.name === 'Renamed');
+    ok('update clamps duration to 60', updated.durationMinutes === 60);
+
+    const after4 = dm.deleteScheduleRule(id1);
+    ok('delete removes rule', after4.length === 1 && after4[0].id !== id1);
+
+    // Defensive: setDeepWorkSchedule sanitizes inputs.
+    // Design: null/non-objects are dropped; valid-looking objects with
+    // missing fields are normalized to sensible defaults rather than
+    // discarded — keeps storage forgiving across schema migrations.
+    const sanitized = dm.setDeepWorkSchedule([
+        { id: 'x', name: 'bad time',  days: [8, 1, -3, 'cat', 1], startTime: '99:99', durationMinutes: 9999 },
+        null,
+        'not even an object',
+        { not: 'a-rule' },  // gets normalized to defaults (empty days, 09:00, 60min)
+        { name: 'no-id-passes', days: [2], startTime: '10:00', durationMinutes: 90 }
+    ]);
+    ok('null + non-objects dropped (5 in -> 3 out)', sanitized.length === 3, sanitized);
+    ok('out-of-range days filtered + deduped', JSON.stringify(sanitized[0].days) === '[1]', sanitized[0]);
+    ok('invalid time falls back to 09:00', sanitized[0].startTime === '09:00', sanitized[0]);
+    ok('duration capped at 480', sanitized[0].durationMinutes === 480);
+    ok('object without required fields gets defaults', sanitized[1].days.length === 0 && sanitized[1].startTime === '09:00');
+    ok('missing id is generated', typeof sanitized[2].id === 'string' && sanitized[2].id.length > 0);
+});
+
+group('DataManager.shouldFireRuleNow predicate', () => {
+    const DataManager = require('../dataManager');
+
+    // Build a fake "Mon 2026-06-01 09:02:30" — a Monday so weekday=1.
+    const monAt0902 = new Date(2026, 5, 1, 9, 2, 30);
+    ok('synthetic Monday 9:02 has weekday 1', monAt0902.getDay() === 1);
+
+    const rule = {
+        id: 'r1', enabled: true, name: 't',
+        days: [1, 2, 3, 4, 5], startTime: '09:00',
+        durationMinutes: 60, lastFiredOn: null
+    };
+    ok('fires inside grace window', DataManager.shouldFireRuleNow(rule, monAt0902, 5) === true);
+
+    const monAt0830 = new Date(2026, 5, 1, 8, 30, 0);
+    ok('does not fire before scheduled time', DataManager.shouldFireRuleNow(rule, monAt0830, 5) === false);
+
+    const monAt0910 = new Date(2026, 5, 1, 9, 10, 0);
+    ok('does not fire past grace window (10min > 5min)', DataManager.shouldFireRuleNow(rule, monAt0910, 5) === false);
+
+    const ruleAlreadyFired = { ...rule, lastFiredOn: '2026-06-01' };
+    ok('does not fire when already fired today', DataManager.shouldFireRuleNow(ruleAlreadyFired, monAt0902, 5) === false);
+
+    const sunAt0902 = new Date(2026, 5, 7, 9, 2, 0); // Sun Jun 7
+    ok('does not fire on non-scheduled weekday', DataManager.shouldFireRuleNow(rule, sunAt0902, 5) === false);
+
+    const disabled = { ...rule, enabled: false };
+    ok('does not fire when disabled', DataManager.shouldFireRuleNow(disabled, monAt0902, 5) === false);
+
+    const noDays = { ...rule, days: [] };
+    ok('does not fire when no days set', DataManager.shouldFireRuleNow(noDays, monAt0902, 5) === false);
+});
+
+group('DataManager.computeNextFireTime', () => {
+    const DataManager = require('../dataManager');
+
+    // Mon 2026-06-01 10:00 — past 09:00 weekday rule, before 14:00 weekday rule.
+    const monAt1000 = new Date(2026, 5, 1, 10, 0, 0);
+
+    const morningRule = {
+        id: 'm', enabled: true, name: 'Morning',
+        days: [1, 2, 3, 4, 5], startTime: '09:00',
+        durationMinutes: 60, lastFiredOn: null
+    };
+    const afternoonRule = {
+        id: 'a', enabled: true, name: 'Afternoon',
+        days: [1, 2, 3, 4, 5], startTime: '14:00',
+        durationMinutes: 60, lastFiredOn: null
+    };
+
+    const next1 = DataManager.computeNextFireTime([morningRule, afternoonRule], monAt1000);
+    ok('next is Afternoon (today)', next1.ruleId === 'a', next1);
+    ok('next fires at 14:00 today', next1.fireAt.getHours() === 14 && next1.fireAt.getDate() === 1);
+
+    // Mon 16:00 — both 09 and 14 are past for today, so next is tomorrow's morning rule (Tue).
+    const monAt1600 = new Date(2026, 5, 1, 16, 0, 0);
+    const next2 = DataManager.computeNextFireTime([morningRule, afternoonRule], monAt1600);
+    ok('after both windows, next is tomorrow Morning', next2.ruleId === 'm', next2);
+    ok('next fireAt is Tue Jun 2', next2.fireAt.getDate() === 2 && next2.fireAt.getDay() === 2);
+
+    // Disabled rule excluded.
+    const next3 = DataManager.computeNextFireTime([{ ...morningRule, enabled: false }, afternoonRule], monAt1000);
+    ok('disabled rule excluded', next3.ruleId === 'a');
+
+    // No enabled rules -> null.
+    const next4 = DataManager.computeNextFireTime([{ ...morningRule, enabled: false }], monAt1000);
+    ok('null when no enabled rules', next4 === null);
+
+    // Sunday-only rule from Monday morning -> next is next Sunday.
+    const sundayOnly = { ...morningRule, days: [0] };
+    const next5 = DataManager.computeNextFireTime([sundayOnly], monAt1000);
+    ok('sunday-only from Mon -> next Sun', next5.fireAt.getDay() === 0, next5);
+});
+
+// ---------------------------------------------------------------------------
+// 6) Summary
 // ---------------------------------------------------------------------------
 console.log('\n=========================================');
 console.log(`PASS: ${passed}   FAIL: ${failed}   WARN: ${warnings.length}`);

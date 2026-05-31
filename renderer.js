@@ -132,6 +132,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     setupEventListeners();
     initReportsPanel(initialData?.reportSettings);
     initDeepWorkEditor(initialData);
+    initSchedulePanel(initialData);
     await initSettingsPanel();
     // Ensure DW badges + disable states reflect any session that was already running at load.
     syncDeepWorkEditorActiveState(!!(initialData?.deepWork?.isActive), initialData?.deepWork?.remainingMs || 0);
@@ -1267,6 +1268,310 @@ function initDeepWorkEditor(initialPayload) {
         if (!r?.success) alert(`Could not end session: ${r?.error || 'unknown'}`);
         await reloadDashboardFromMain('deep-work-ended-early');
     });
+}
+
+// ---------------------------------------------------------------------------
+// Deep Work auto-schedule (Dashboard panel + Rule editor modal)
+// ---------------------------------------------------------------------------
+// State + DOM refs are scoped via the module-level `scheduleState`. Listens to
+// 'schedule-event' broadcasts from main so the "next fire" line and rule list
+// refresh whenever a scheduled session fires.
+
+const DAY_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+const DAY_LONG = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+const scheduleState = {
+    rules: [],
+    next: null,
+    editingId: null, // null when modal is opening as "Create"
+    modalDays: new Set(),
+    subscribed: false,
+};
+
+function formatRuleSummary(rule) {
+    const days = (rule.days || []).slice().sort();
+    let dayLabel;
+    if (days.length === 7) dayLabel = 'Every day';
+    else if (days.length === 5 && days.every(d => d >= 1 && d <= 5)) dayLabel = 'Weekdays';
+    else if (days.length === 2 && days.includes(0) && days.includes(6)) dayLabel = 'Weekends';
+    else if (days.length === 0) dayLabel = 'Never';
+    else dayLabel = days.map(d => DAY_LONG[d]).join(', ');
+
+    const [h, m] = (rule.startTime || '09:00').split(':').map(Number);
+    const period = h >= 12 ? 'PM' : 'AM';
+    const h12 = ((h + 11) % 12) + 1;
+    const timeLabel = `${h12}:${String(m).padStart(2, '0')} ${period}`;
+
+    const mins = rule.durationMinutes || 60;
+    const durLabel = mins >= 60
+        ? (mins % 60 === 0 ? `${mins / 60}h` : `${Math.floor(mins / 60)}h ${mins % 60}m`)
+        : `${mins}m`;
+
+    return `${dayLabel} \u00b7 ${timeLabel} \u00b7 ${durLabel}`;
+}
+
+function formatNextFireFromIso(iso) {
+    if (!iso) return null;
+    const d = new Date(iso);
+    if (isNaN(d)) return null;
+    const now = new Date();
+    const sameDay = d.getFullYear() === now.getFullYear()
+        && d.getMonth() === now.getMonth()
+        && d.getDate() === now.getDate();
+    const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    const isTomorrow = d.getFullYear() === tomorrow.getFullYear()
+        && d.getMonth() === tomorrow.getMonth()
+        && d.getDate() === tomorrow.getDate();
+    const time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+    if (sameDay) return `Today at ${time}`;
+    if (isTomorrow) return `Tomorrow (${DAY_LONG[d.getDay()]}) at ${time}`;
+    return `${DAY_LONG[d.getDay()]}, ${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} at ${time}`;
+}
+
+function renderScheduleList() {
+    const listEl = document.getElementById('schedule-rule-list');
+    const emptyEl = document.getElementById('schedule-empty-state');
+    const nextEl = document.getElementById('schedule-next-fire');
+    if (!listEl || !emptyEl || !nextEl) return;
+
+    if (!scheduleState.rules.length) {
+        listEl.innerHTML = '';
+        emptyEl.classList.remove('hidden');
+        nextEl.textContent = 'No rules scheduled.';
+        nextEl.style.color = 'var(--ink-3)';
+        return;
+    }
+
+    emptyEl.classList.add('hidden');
+
+    if (scheduleState.next) {
+        const when = formatNextFireFromIso(scheduleState.next.fireAt) || '\u2014';
+        nextEl.textContent = `Next: ${when} \u2014 ${scheduleState.next.ruleName}`;
+        nextEl.style.color = 'var(--accent-2)';
+    } else {
+        nextEl.textContent = 'No upcoming sessions (all rules disabled or have no days set).';
+        nextEl.style.color = 'var(--ink-3)';
+    }
+
+    listEl.innerHTML = scheduleState.rules.map(rule => {
+        const safeId = String(rule.id).replace(/"/g, '&quot;');
+        const safeName = String(rule.name || '').replace(/</g, '&lt;');
+        const dotColor = rule.enabled ? 'var(--good)' : 'var(--ink-4)';
+        const summary = formatRuleSummary(rule);
+        return `
+            <li class="row flex items-center gap-3 py-2.5">
+                <span class="site-dot" style="background:${dotColor};"></span>
+                <div class="flex-1 min-w-0">
+                    <div class="font-semibold" style="font-size:13px; color: var(--ink);">${safeName || 'Untitled'}</div>
+                    <div class="num" style="font-size:11px; color: var(--ink-3); margin-top:1px;">${summary}</div>
+                </div>
+                <button class="schedule-rule-edit btn btn-ghost"
+                        style="padding:3px 9px; font-size:11px;"
+                        data-rule-id="${safeId}">Edit</button>
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox"
+                           class="schedule-rule-enabled sr-only peer"
+                           data-rule-id="${safeId}"
+                           ${rule.enabled ? 'checked' : ''}>
+                    <div style="width:30px; height:17px; background:${rule.enabled ? 'var(--accent)' : 'var(--line)'}; border-radius:9999px; transition:background-color 0.15s; position:relative;">
+                        <div style="position:absolute; top:2px; left:${rule.enabled ? '15px' : '2px'}; width:13px; height:13px; background:${rule.enabled ? 'white' : 'var(--ink-2)'}; border-radius:9999px; transition:left 0.15s, background-color 0.15s;"></div>
+                    </div>
+                </label>
+            </li>
+        `;
+    }).join('');
+}
+
+async function reloadSchedule() {
+    try {
+        const data = await window.electronAPI.scheduleGet();
+        scheduleState.rules = Array.isArray(data?.rules) ? data.rules : [];
+        scheduleState.next = data?.next || null;
+        renderScheduleList();
+    } catch (e) {
+        console.error('reloadSchedule:', e);
+    }
+}
+
+function openScheduleModal(rule = null) {
+    const modal = document.getElementById('schedule-modal');
+    const title = document.getElementById('schedule-modal-title');
+    const nameEl = document.getElementById('schedule-modal-name');
+    const startEl = document.getElementById('schedule-modal-start');
+    const hrsEl = document.getElementById('schedule-modal-hours');
+    const minsEl = document.getElementById('schedule-modal-minutes');
+    const deleteBtn = document.getElementById('schedule-modal-delete-btn');
+    const err = document.getElementById('schedule-modal-error');
+    if (!modal) return;
+
+    scheduleState.editingId = rule?.id || null;
+    scheduleState.modalDays = new Set(rule?.days || []);
+
+    title.textContent = rule ? 'Edit scheduled session' : 'New scheduled session';
+    nameEl.value = rule?.name || '';
+    startEl.value = rule?.startTime || '09:00';
+    const dm = rule?.durationMinutes || 60;
+    hrsEl.value = String(Math.floor(dm / 60));
+    minsEl.value = String(dm % 60);
+    deleteBtn.classList.toggle('hidden', !rule);
+    err.classList.add('hidden');
+    err.textContent = '';
+
+    renderScheduleModalDays();
+    modal.classList.remove('hidden');
+    setTimeout(() => nameEl.focus(), 50);
+}
+
+function closeScheduleModal() {
+    document.getElementById('schedule-modal')?.classList.add('hidden');
+    scheduleState.editingId = null;
+}
+
+function renderScheduleModalDays() {
+    const container = document.getElementById('schedule-modal-days');
+    if (!container) return;
+    container.innerHTML = DAY_LABELS.map((label, i) => {
+        const on = scheduleState.modalDays.has(i);
+        return `<button type="button"
+                        class="schedule-day-pill"
+                        data-day-index="${i}"
+                        title="${DAY_LONG[i]}"
+                        style="width:32px; height:32px; border-radius:6px;
+                               border:1px solid ${on ? 'var(--accent)' : 'var(--line)'};
+                               background:${on ? 'var(--accent)' : 'var(--bg-2)'};
+                               color:${on ? 'white' : 'var(--ink-2)'};
+                               font-weight:600; font-size:12px; cursor:pointer;
+                               transition: background-color 0.12s, border-color 0.12s, color 0.12s;">
+                    ${label}
+                </button>`;
+    }).join('');
+}
+
+function readScheduleModalForm() {
+    const name = document.getElementById('schedule-modal-name').value.trim() || 'Untitled';
+    const startTime = document.getElementById('schedule-modal-start').value;
+    const hrs = parseInt(document.getElementById('schedule-modal-hours').value, 10) || 0;
+    const mins = parseInt(document.getElementById('schedule-modal-minutes').value, 10) || 0;
+    const durationMinutes = (hrs * 60) + mins;
+    const days = Array.from(scheduleState.modalDays).sort();
+    return { name, startTime, durationMinutes, days };
+}
+
+function validateScheduleForm(form) {
+    if (!form.startTime || !/^\d{2}:\d{2}$/.test(form.startTime)) return 'Please pick a start time.';
+    if (form.days.length === 0) return 'Pick at least one day of the week.';
+    if (form.durationMinutes < 1) return 'Duration must be at least 1 minute.';
+    if (form.durationMinutes > 480) return 'Duration cannot exceed 8 hours.';
+    return null;
+}
+
+async function saveScheduleModal() {
+    const form = readScheduleModalForm();
+    const validationError = validateScheduleForm(form);
+    const errEl = document.getElementById('schedule-modal-error');
+    if (validationError) {
+        errEl.textContent = validationError;
+        errEl.classList.remove('hidden');
+        return;
+    }
+
+    try {
+        if (scheduleState.editingId) {
+            await window.electronAPI.scheduleUpdate(scheduleState.editingId, {
+                ...form, enabled: true
+            });
+        } else {
+            await window.electronAPI.scheduleAdd({ ...form, enabled: true });
+        }
+        closeScheduleModal();
+        await reloadSchedule();
+    } catch (e) {
+        errEl.textContent = `Could not save: ${e?.message || e}`;
+        errEl.classList.remove('hidden');
+    }
+}
+
+async function deleteScheduleFromModal() {
+    if (!scheduleState.editingId) return;
+    if (!confirm('Delete this scheduled session?')) return;
+    try {
+        await window.electronAPI.scheduleDelete(scheduleState.editingId);
+        closeScheduleModal();
+        await reloadSchedule();
+    } catch (e) {
+        console.error('Schedule delete failed:', e);
+    }
+}
+
+async function toggleScheduleRuleEnabled(id, enabled) {
+    try {
+        await window.electronAPI.scheduleUpdate(id, { enabled });
+        await reloadSchedule();
+    } catch (e) {
+        console.error('Schedule toggle failed:', e);
+        await reloadSchedule();
+    }
+}
+
+function initSchedulePanel(initialPayload) {
+    // Seed from initial-data so we don't need an extra IPC roundtrip on boot.
+    if (Array.isArray(initialPayload?.deepWorkSchedule)) {
+        scheduleState.rules = initialPayload.deepWorkSchedule;
+    }
+
+    // Subscribe to fire/skip notifications so the list refreshes immediately.
+    if (!scheduleState.subscribed && window.electronAPI?.onScheduleEvent) {
+        window.electronAPI.onScheduleEvent(() => { reloadSchedule(); });
+        scheduleState.subscribed = true;
+    }
+
+    // List interactions (event-delegated on the parent <ul>).
+    const list = document.getElementById('schedule-rule-list');
+    list?.addEventListener('click', (e) => {
+        const editBtn = e.target.closest('.schedule-rule-edit');
+        if (editBtn) {
+            const id = editBtn.dataset.ruleId;
+            const rule = scheduleState.rules.find(r => r.id === id);
+            if (rule) openScheduleModal(rule);
+        }
+    });
+    list?.addEventListener('change', (e) => {
+        const toggle = e.target.closest('.schedule-rule-enabled');
+        if (toggle) {
+            toggleScheduleRuleEnabled(toggle.dataset.ruleId, toggle.checked);
+        }
+    });
+
+    document.getElementById('schedule-add-btn')?.addEventListener('click', () => openScheduleModal(null));
+
+    // Modal controls.
+    document.getElementById('schedule-modal-cancel')?.addEventListener('click', closeScheduleModal);
+    document.getElementById('schedule-modal-save')?.addEventListener('click', saveScheduleModal);
+    document.getElementById('schedule-modal-delete-btn')?.addEventListener('click', deleteScheduleFromModal);
+    document.getElementById('schedule-modal')?.addEventListener('click', (e) => {
+        if (e.target.id === 'schedule-modal') closeScheduleModal();
+    });
+
+    // Day pill toggles (event-delegated).
+    document.getElementById('schedule-modal-days')?.addEventListener('click', (e) => {
+        const pill = e.target.closest('.schedule-day-pill');
+        if (!pill) return;
+        const idx = parseInt(pill.dataset.dayIndex, 10);
+        if (scheduleState.modalDays.has(idx)) scheduleState.modalDays.delete(idx);
+        else scheduleState.modalDays.add(idx);
+        renderScheduleModalDays();
+    });
+
+    // Day quick-presets.
+    const setDays = (arr) => { scheduleState.modalDays = new Set(arr); renderScheduleModalDays(); };
+    document.getElementById('schedule-modal-days-weekdays')?.addEventListener('click', () => setDays([1, 2, 3, 4, 5]));
+    document.getElementById('schedule-modal-days-weekends')?.addEventListener('click', () => setDays([0, 6]));
+    document.getElementById('schedule-modal-days-everyday')?.addEventListener('click', () => setDays([0, 1, 2, 3, 4, 5, 6]));
+    document.getElementById('schedule-modal-days-clear')?.addEventListener('click', () => setDays([]));
+
+    // Initial render with seeded data, then async refresh to grab the "next" calculation.
+    renderScheduleList();
+    reloadSchedule();
 }
 
 // ---------------------------------------------------------------------------

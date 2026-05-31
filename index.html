@@ -502,6 +502,28 @@
                             <button id="deep-work-end-early-btn" class="btn btn-ghost" style="color: var(--bad); padding: 4px 10px;">End session early</button>
                         </div>
 
+                        <!-- =================== AUTO-SCHEDULE ==================== -->
+                        <div class="mt-5 pt-4" style="border-top: 1px solid var(--line);">
+                            <div class="flex items-center justify-between mb-1">
+                                <h3 class="font-semibold" style="font-size:13px;">Auto-schedule</h3>
+                                <button id="schedule-add-btn" class="btn" style="padding: 3px 10px; font-size: 12px;">+ Add rule</button>
+                            </div>
+                            <p style="color: var(--ink-3); font-size: 11px;" class="mb-3">
+                                Recurring sessions that start automatically. Uses your Deep Work block list above.
+                            </p>
+                            <p id="schedule-next-fire" class="num mb-3"
+                               style="font-size: 12px; color: var(--accent-2);">
+                                &mdash;
+                            </p>
+                            <ul id="schedule-rule-list" class="list-none">
+                                <!-- Populated by renderer -->
+                            </ul>
+                            <p id="schedule-empty-state" class="hidden"
+                               style="color: var(--ink-3); font-size: 12px; font-style: italic; padding: 8px 0;">
+                                No scheduled sessions yet. Click <span class="num">+ Add rule</span> to create one.
+                            </p>
+                        </div>
+
                         <!-- Emergency Override (Nuclear) -->
                         <div class="mt-5 pt-4" style="border-top: 1px solid var(--line);">
                             <div class="flex items-center justify-between gap-4">
@@ -770,6 +792,68 @@
                 </section>
             </div>
         </main>
+    </div>
+
+    <!-- ====================================================
+         SCHEDULE RULE EDITOR MODAL
+         ==================================================== -->
+    <div id="schedule-modal" class="hidden"
+         style="position:fixed; inset:0; background:rgba(0,0,0,0.75);
+                backdrop-filter:blur(4px); z-index:60;
+                display:flex; align-items:center; justify-content:center;">
+        <div id="schedule-modal-content"
+             style="background: var(--panel); border: 1px solid var(--line);
+                    border-radius: 10px; padding: 24px; max-width: 480px; width: 90%;">
+            <h2 class="font-semibold mb-3" style="font-size: 15px;" id="schedule-modal-title">New scheduled session</h2>
+
+            <div class="mb-4">
+                <label class="label block mb-1">Name</label>
+                <input type="text" id="schedule-modal-name" placeholder="e.g. Morning focus"
+                       class="w-full" maxlength="60">
+            </div>
+
+            <div class="mb-4">
+                <label class="label block mb-2">Days of week</label>
+                <div id="schedule-modal-days" class="flex gap-1.5">
+                    <!-- 7 day-toggles injected by renderer -->
+                </div>
+                <div class="flex gap-2 mt-2 num" style="font-size: 11px;">
+                    <button type="button" id="schedule-modal-days-weekdays" class="btn btn-ghost" style="padding:2px 8px; font-size:11px;">Weekdays</button>
+                    <button type="button" id="schedule-modal-days-weekends" class="btn btn-ghost" style="padding:2px 8px; font-size:11px;">Weekends</button>
+                    <button type="button" id="schedule-modal-days-everyday" class="btn btn-ghost" style="padding:2px 8px; font-size:11px;">Every day</button>
+                    <button type="button" id="schedule-modal-days-clear" class="btn btn-ghost" style="padding:2px 8px; font-size:11px;">Clear</button>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-3 mb-4">
+                <div>
+                    <label class="label block mb-1">Start time</label>
+                    <input type="time" id="schedule-modal-start" value="09:00" class="w-full num">
+                </div>
+                <div>
+                    <label class="label block mb-1">Duration</label>
+                    <div class="grid grid-cols-2 gap-2">
+                        <input type="number" id="schedule-modal-hours" min="0" max="8" value="1" class="text-center num">
+                        <input type="number" id="schedule-modal-minutes" min="0" max="59" value="0" step="5" class="text-center num">
+                    </div>
+                    <div class="grid grid-cols-2 gap-2 mt-1">
+                        <span class="label text-center">hrs</span>
+                        <span class="label text-center">min</span>
+                    </div>
+                </div>
+            </div>
+
+            <div id="schedule-modal-error" class="hidden mb-3"
+                 style="color: var(--bad); font-size: 12px;"></div>
+
+            <div class="flex justify-between items-center">
+                <button id="schedule-modal-delete-btn" class="btn btn-ghost hidden" style="color: var(--bad);">Delete rule</button>
+                <div class="flex gap-2 ml-auto">
+                    <button id="schedule-modal-cancel" class="btn">Cancel</button>
+                    <button id="schedule-modal-save" class="btn btn-primary">Save</button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- ====================================================

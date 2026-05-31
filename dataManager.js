@@ -673,6 +673,7 @@ class DataManager {
             reportSettings: this.getReportSettings(),
             deepWorkConfig: this.getDeepWorkConfig(),
             deepWorkSpecialSites: this.getDeepWorkSpecialSites(),
+            deepWorkSchedule: this.getDeepWorkSchedule(),
             ...hostsIntegrityOverlay
         };
     }
@@ -778,6 +779,181 @@ class DataManager {
         const next = { ...this.getReportSettings(), ...(partial || {}) };
         this.store.set('reportSettings', next);
         return next;
+    }
+
+    // ---------------- Deep Work auto-schedule ----------------
+    //
+    // Rules persist in `store.deepWorkSchedule`. Each rule is:
+    //   { id, enabled, name, days[0..6 Sun..Sat], startTime "HH:MM",
+    //     durationMinutes, lastFiredOn "YYYY-MM-DD" | null }
+    //
+    // Why we store `lastFiredOn` per rule instead of inferring from current
+    // session state: a rule may legitimately want to fire even if a manual
+    // session ended earlier today. The `lastFiredOn` guard prevents the
+    // 30-second evaluator from firing the same rule twice if it stays in the
+    // 5-minute grace window across multiple ticks.
+
+    getDeepWorkSchedule() {
+        const raw = this.store.get('deepWorkSchedule', []);
+        if (!Array.isArray(raw)) return [];
+        // Defensive normalization for older / partial data.
+        return raw
+            .filter(r => r && typeof r === 'object' && r.id)
+            .map(r => ({
+                id: String(r.id),
+                enabled: !!r.enabled,
+                name: String(r.name || 'Untitled'),
+                days: Array.isArray(r.days)
+                    ? Array.from(new Set(r.days.map(d => Number(d)).filter(d => Number.isInteger(d) && d >= 0 && d <= 6))).sort()
+                    : [],
+                startTime: this._normalizeHHMM(r.startTime),
+                durationMinutes: this._clampDuration(r.durationMinutes),
+                lastFiredOn: typeof r.lastFiredOn === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(r.lastFiredOn)
+                    ? r.lastFiredOn
+                    : null
+            }));
+    }
+
+    _normalizeHHMM(s) {
+        if (typeof s !== 'string') return '09:00';
+        const m = s.match(/^(\d{1,2}):(\d{1,2})$/);
+        if (!m) return '09:00';
+        const h = parseInt(m[1], 10);
+        const mm = parseInt(m[2], 10);
+        // Reject (not clamp) out-of-range values. A corrupted "99:99" should
+        // fall back to a known-safe default, not silently fire at 23:59.
+        if (h < 0 || h > 23 || mm < 0 || mm > 59) return '09:00';
+        return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+    }
+
+    _clampDuration(n) {
+        const v = parseInt(n, 10);
+        if (!Number.isFinite(v) || v < 1) return 60;
+        if (v > 480) return 480; // cap matches the manual UI cap (8h)
+        return v;
+    }
+
+    setDeepWorkSchedule(rules) {
+        const list = Array.isArray(rules) ? rules : [];
+        const normalized = list
+            .filter(r => r && typeof r === 'object')
+            .map(r => ({
+                id: r.id ? String(r.id) : this._genId(),
+                enabled: !!r.enabled,
+                name: String(r.name || 'Untitled').slice(0, 60),
+                days: Array.isArray(r.days)
+                    ? Array.from(new Set(r.days.map(d => Number(d)).filter(d => Number.isInteger(d) && d >= 0 && d <= 6))).sort()
+                    : [],
+                startTime: this._normalizeHHMM(r.startTime),
+                durationMinutes: this._clampDuration(r.durationMinutes),
+                lastFiredOn: typeof r.lastFiredOn === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(r.lastFiredOn)
+                    ? r.lastFiredOn
+                    : null
+            }));
+        this.store.set('deepWorkSchedule', normalized);
+        return normalized;
+    }
+
+    _genId() {
+        try {
+            const { randomUUID } = require('crypto');
+            return randomUUID();
+        } catch (_) {
+            return 'r_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+        }
+    }
+
+    addScheduleRule(partial) {
+        const rules = this.getDeepWorkSchedule();
+        const rule = {
+            id: this._genId(),
+            enabled: partial?.enabled !== false,
+            name: partial?.name || 'Untitled',
+            days: partial?.days || [],
+            startTime: partial?.startTime || '09:00',
+            durationMinutes: partial?.durationMinutes || 60,
+            lastFiredOn: null
+        };
+        rules.push(rule);
+        return this.setDeepWorkSchedule(rules);
+    }
+
+    updateScheduleRule(id, partial) {
+        const rules = this.getDeepWorkSchedule();
+        const idx = rules.findIndex(r => r.id === id);
+        if (idx === -1) return rules;
+        rules[idx] = { ...rules[idx], ...(partial || {}), id }; // id pinned
+        return this.setDeepWorkSchedule(rules);
+    }
+
+    deleteScheduleRule(id) {
+        const rules = this.getDeepWorkSchedule().filter(r => r.id !== id);
+        return this.setDeepWorkSchedule(rules);
+    }
+
+    /**
+     * Mark a rule as having fired today so the 30s evaluator doesn't re-fire
+     * inside the grace window.
+     */
+    markScheduleRuleFired(id, isoDate) {
+        return this.updateScheduleRule(id, { lastFiredOn: isoDate });
+    }
+
+    /**
+     * Decide whether `rule` should fire RIGHT NOW. Pure function (no I/O), so
+     * it's trivially unit-testable.
+     *   - `now` is a Date (caller supplies, for testability)
+     *   - `graceMinutes` is the late-fire allowance (default 5)
+     * Returns true iff: enabled, today's weekday is in rule.days,
+     * now-clock has advanced past startTime, the gap is <= grace,
+     * and lastFiredOn != today.
+     */
+    static shouldFireRuleNow(rule, now = new Date(), graceMinutes = 5) {
+        if (!rule || !rule.enabled) return false;
+        if (!Array.isArray(rule.days) || !rule.days.includes(now.getDay())) return false;
+        const m = (rule.startTime || '').match(/^(\d{2}):(\d{2})$/);
+        if (!m) return false;
+        const schedHour = parseInt(m[1], 10);
+        const schedMin = parseInt(m[2], 10);
+
+        const nowMins = now.getHours() * 60 + now.getMinutes();
+        const schedMins = schedHour * 60 + schedMin;
+        if (nowMins < schedMins) return false;
+        if (nowMins - schedMins > graceMinutes) return false;
+
+        const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+        if (rule.lastFiredOn === today) return false;
+
+        return true;
+    }
+
+    /**
+     * Compute the next fire moment across ALL enabled rules, or null if none
+     * would ever fire. Returns { ruleId, ruleName, fireAt: Date }.
+     * Looks ahead up to 7 days.
+     */
+    static computeNextFireTime(rules, now = new Date()) {
+        if (!Array.isArray(rules)) return null;
+        let best = null;
+        for (const rule of rules) {
+            if (!rule || !rule.enabled || !Array.isArray(rule.days) || rule.days.length === 0) continue;
+            const m = (rule.startTime || '').match(/^(\d{2}):(\d{2})$/);
+            if (!m) continue;
+            const schedHour = parseInt(m[1], 10);
+            const schedMin  = parseInt(m[2], 10);
+
+            // Walk forward day-by-day up to 7 days to find the next match.
+            for (let offset = 0; offset < 8; offset++) {
+                const candidate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset, schedHour, schedMin, 0, 0);
+                if (candidate <= now) continue;
+                if (!rule.days.includes(candidate.getDay())) continue;
+                if (!best || candidate < best.fireAt) {
+                    best = { ruleId: rule.id, ruleName: rule.name, fireAt: candidate };
+                }
+                break; // first hit for this rule is the nearest
+            }
+        }
+        return best;
     }
 
     // ---------------- Deep Work helpers (normalization) ----------------

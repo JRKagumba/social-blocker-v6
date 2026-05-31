@@ -23,6 +23,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   endDeepWork: () => ipcRenderer.invoke('end-deep-work'),
   getDeepWorkConfig: () => ipcRenderer.invoke('get-deep-work-config'),
   setDeepWorkConfig: (partial) => ipcRenderer.invoke('set-deep-work-config', partial),
+
+  // --- Deep Work Auto-Schedule ---
+  scheduleGet:    () => ipcRenderer.invoke('schedule-get'),
+  scheduleAdd:    (rule) => ipcRenderer.invoke('schedule-add', rule),
+  scheduleUpdate: (id, changes) => ipcRenderer.invoke('schedule-update', { id, changes }),
+  scheduleDelete: (id) => ipcRenderer.invoke('schedule-delete', { id }),
   
   // --- History and Logging ---
   getHistory: () => ipcRenderer.invoke('get-history'),
@@ -78,5 +84,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('update-ready', (_event, payload) => callback(payload)),
   onUpdaterEvent: (callback) =>
     ipcRenderer.on('updater-event', (_event, payload) => callback(payload)),
+  onScheduleEvent: (callback) =>
+    ipcRenderer.on('schedule-event', (_event, payload) => callback(payload)),
 });
 

@@ -45,6 +45,9 @@ let digestCheckInterval = null;
 let reportGenerator = null;
 let updaterCheckInterval = null;
 let updaterReadyPayload = null;
+let scheduleEvaluatorInterval = null;
+const SCHEDULE_EVAL_INTERVAL_MS = 30 * 1000; // tick every 30s
+const SCHEDULE_GRACE_MINUTES = 5;            // late-fire allowance after scheduled time
 
 // --- Commitment Paragraphs ---
 const commitmentParagraphs = [
@@ -301,6 +304,100 @@ function setupAutoUpdater() {
     updaterCheckInterval = setInterval(() => {
         autoUpdater.checkForUpdates().catch(e => console.error('Updater periodic check:', e?.message || e));
     }, 6 * 60 * 60 * 1000);
+}
+
+// ---------------------------------------------------------------------------
+// DEEP WORK AUTO-SCHEDULE EVALUATOR
+// ---------------------------------------------------------------------------
+// Ticks every 30s and fires any rule whose window is "now" (within a 5-minute
+// grace). Why 30s instead of waiting until the exact moment with setTimeout?
+//  - Robust against sleep/wake: when the machine resumes we naturally re-evaluate
+//    on the next tick instead of trusting a long-since-stale timer.
+//  - Robust against system clock changes (DST, manual time adjust, time-sync).
+//  - Cheap: ~2 array iterations per tick, no I/O unless we actually fire.
+//
+// Double-fire guard: once a rule fires, dataManager marks lastFiredOn=today
+// so subsequent ticks inside the grace window skip it.
+//
+// Active-session guard: if any deep work is already running (manual or
+// scheduled), we mark the rule as fired (so it doesn't try again later today)
+// and log a skip — surprising users with overlapping sessions is worse than
+// silently honouring the manual one.
+
+function broadcastScheduleEvent(type, payload = {}) {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        try {
+            mainWindow.webContents.send('schedule-event', { type, at: Date.now(), ...payload });
+        } catch (_) {}
+    }
+}
+
+function evaluateSchedule() {
+    if (!dataManager) return;
+    let rules;
+    try {
+        rules = dataManager.getDeepWorkSchedule();
+    } catch (e) {
+        console.warn('Schedule evaluator: getDeepWorkSchedule threw:', e?.message || e);
+        return;
+    }
+    if (!rules || rules.length === 0) return;
+
+    const now = new Date();
+    const todayISO = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+    for (const rule of rules) {
+        const DataManager = dataManager.constructor;
+        if (!DataManager.shouldFireRuleNow(rule, now, SCHEDULE_GRACE_MINUTES)) continue;
+
+        // Active-session guard.
+        const currentDw = dataManager.normalizeDeepWork(dataManager.getDeepWork());
+        if (currentDw && currentDw.isActive) {
+            console.log(`Schedule: rule "${rule.name}" (${rule.id}) skipped — Deep Work already active.`);
+            dataManager.markScheduleRuleFired(rule.id, todayISO);
+            broadcastScheduleEvent('skipped-active', { ruleId: rule.id, ruleName: rule.name });
+            continue;
+        }
+
+        const durationSeconds = (rule.durationMinutes || 60) * 60;
+        console.log(`Schedule: firing rule "${rule.name}" (${rule.id}) — ${rule.durationMinutes}min`);
+        try {
+            startDeepWork(durationSeconds);
+            dataManager.markScheduleRuleFired(rule.id, todayISO);
+            broadcastScheduleEvent('fired', {
+                ruleId: rule.id,
+                ruleName: rule.name,
+                durationMinutes: rule.durationMinutes
+            });
+            if (Notification.isSupported()) {
+                try {
+                    new Notification({
+                        title: `Deep Work started: ${rule.name}`,
+                        body: `Auto-scheduled session running for ${rule.durationMinutes} minutes.`
+                    }).show();
+                } catch (_) {}
+            }
+        } catch (e) {
+            console.error(`Schedule: rule "${rule.name}" failed to start:`, e?.message || e);
+            broadcastScheduleEvent('error', { ruleId: rule.id, ruleName: rule.name, message: e?.message || String(e) });
+        }
+    }
+}
+
+function startScheduleEvaluator() {
+    if (scheduleEvaluatorInterval) clearInterval(scheduleEvaluatorInterval);
+    // Run once immediately so an app launch at the scheduled time catches it
+    // without waiting 30s.
+    evaluateSchedule();
+    scheduleEvaluatorInterval = setInterval(evaluateSchedule, SCHEDULE_EVAL_INTERVAL_MS);
+    console.log(`Schedule: evaluator running every ${SCHEDULE_EVAL_INTERVAL_MS / 1000}s.`);
+}
+
+function stopScheduleEvaluator() {
+    if (scheduleEvaluatorInterval) {
+        clearInterval(scheduleEvaluatorInterval);
+        scheduleEvaluatorInterval = null;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -915,6 +1012,7 @@ app.whenReady().then(() => {
     scheduleNextMidnightRollover();
     startDigestScheduler();
     setupAutoUpdater();
+    startScheduleEvaluator();
 
     // HUD: restore visibility from last session.
     if (dataManager.getHudConfig().visible) {
@@ -949,6 +1047,7 @@ app.on('before-quit', () => {
         clearInterval(updaterCheckInterval);
         updaterCheckInterval = null;
     }
+    stopScheduleEvaluator();
     if (midnightTimer) {
         clearTimeout(midnightTimer);
         midnightTimer = null;
@@ -1028,6 +1127,35 @@ ipcMain.handle('set-deep-work-config', async (_event, partial) => {
         await applyHostsToSystem('deep_work_config_changed');
     }
     return next;
+});
+
+// --- Deep Work auto-schedule CRUD ---
+ipcMain.handle('schedule-get', async () => {
+    const DataManager = dataManager.constructor;
+    const rules = dataManager.getDeepWorkSchedule();
+    const next = DataManager.computeNextFireTime(rules, new Date());
+    return {
+        rules,
+        next: next ? {
+            ruleId: next.ruleId,
+            ruleName: next.ruleName,
+            fireAt: next.fireAt.toISOString()
+        } : null
+    };
+});
+
+ipcMain.handle('schedule-add', async (_event, partial) => {
+    return dataManager.addScheduleRule(partial || {});
+});
+
+ipcMain.handle('schedule-update', async (_event, payload) => {
+    if (!payload || !payload.id) return dataManager.getDeepWorkSchedule();
+    return dataManager.updateScheduleRule(payload.id, payload.changes || {});
+});
+
+ipcMain.handle('schedule-delete', async (_event, payload) => {
+    if (!payload || !payload.id) return dataManager.getDeepWorkSchedule();
+    return dataManager.deleteScheduleRule(payload.id);
 });
 
 ipcMain.handle('end-deep-work', async () => {
