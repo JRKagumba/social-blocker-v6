@@ -55,6 +55,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   updaterInstallNow: () => ipcRenderer.invoke('updater-install-now'),
   updaterGetStatus: () => ipcRenderer.invoke('updater-get-status'),
 
+  // --- Startup / login item ---
+  startupGet: () => ipcRenderer.invoke('startup-get'),
+  startupSet: (openAtLogin) => ipcRenderer.invoke('startup-set', { openAtLogin }),
+
   // --- HUD widget ---
   hudShow: () => ipcRenderer.invoke('hud-show'),
   hudHide: () => ipcRenderer.invoke('hud-hide'),
@@ -72,5 +76,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('calendar-day-changed', (_event, payload) => callback(payload)),
   onUpdateReady: (callback) =>
     ipcRenderer.on('update-ready', (_event, payload) => callback(payload)),
+  onUpdaterEvent: (callback) =>
+    ipcRenderer.on('updater-event', (_event, payload) => callback(payload)),
 });
 

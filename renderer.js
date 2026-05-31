@@ -19,15 +19,17 @@ const willBlockList = document.getElementById('will-block-list');
 const willUnblockList = document.getElementById('will-unblock-list');
 const willBlockSites = document.getElementById('will-block-sites');
 const willUnblockSites = document.getElementById('will-unblock-sites');
-const tabs = { 
-    dashboard: document.getElementById('tab-dashboard'), 
-    history: document.getElementById('tab-history'), 
-    data: document.getElementById('tab-data') 
+const tabs = {
+    dashboard: document.getElementById('tab-dashboard'),
+    history:   document.getElementById('tab-history'),
+    data:      document.getElementById('tab-data'),
+    settings:  document.getElementById('tab-settings')
 };
-const contents = { 
-    dashboard: document.getElementById('content-dashboard'), 
-    history: document.getElementById('content-history'), 
-    data: document.getElementById('content-data') 
+const contents = {
+    dashboard: document.getElementById('content-dashboard'),
+    history:   document.getElementById('content-history'),
+    data:      document.getElementById('content-data'),
+    settings:  document.getElementById('content-settings')
 };
 const chartCanvas = document.getElementById('history-chart');
 const heatMapContainer = document.getElementById('heat-map-container');
@@ -130,6 +132,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     setupEventListeners();
     initReportsPanel(initialData?.reportSettings);
     initDeepWorkEditor(initialData);
+    await initSettingsPanel();
     // Ensure DW badges + disable states reflect any session that was already running at load.
     syncDeepWorkEditorActiveState(!!(initialData?.deepWork?.isActive), initialData?.deepWork?.remainingMs || 0);
     showTab('dashboard');
@@ -857,6 +860,10 @@ function setupEventListeners() {
         await renderDataTab(); 
         showTab('data'); 
     });
+    tabs.settings.addEventListener('click', async () => {
+        await refreshSettingsPanel();
+        showTab('settings');
+    });
     heatMapDaysSelect.addEventListener('change', () => renderHeatMap());
     cancelCommitmentBtn.addEventListener('click', closeCommitmentModal);
     confirmCommitmentBtn.addEventListener('click', confirmCommitment);
@@ -1260,6 +1267,243 @@ function initDeepWorkEditor(initialPayload) {
         if (!r?.success) alert(`Could not end session: ${r?.error || 'unknown'}`);
         await reloadDashboardFromMain('deep-work-ended-early');
     });
+}
+
+// ---------------------------------------------------------------------------
+// Settings panel
+// ---------------------------------------------------------------------------
+// Initialized once on DOMContentLoaded. Each section reads its current state
+// from a dedicated IPC and binds change handlers that immediately persist.
+// The updater section also subscribes to the live 'updater-event' stream so
+// progress (checking / downloading-NN% / downloaded) is reflected in real time.
+
+let settingsUpdaterSubscribed = false;
+
+function setUpdaterPill(label, kind = 'mute') {
+    const pill = document.getElementById('settings-updater-pill');
+    if (!pill) return;
+    pill.textContent = label;
+    pill.className = `chip chip-${kind}`;
+}
+
+function setUpdaterStatus(text) {
+    const el = document.getElementById('settings-updater-status');
+    if (el) el.textContent = text;
+}
+
+function showInstallUpdateButton(version) {
+    const btn = document.getElementById('settings-install-update-btn');
+    if (!btn) return;
+    btn.classList.remove('hidden');
+    btn.textContent = version ? `Restart & install v${version}` : 'Restart & install update';
+}
+
+function hideInstallUpdateButton() {
+    document.getElementById('settings-install-update-btn')?.classList.add('hidden');
+}
+
+async function refreshUpdaterCard() {
+    try {
+        const s = await window.electronAPI.updaterGetStatus();
+        const verEl = document.getElementById('settings-current-version');
+        const aboutVerEl = document.getElementById('settings-about-version');
+        const v = s?.currentVersion || '—';
+        if (verEl) verEl.textContent = `v${v}`;
+        if (aboutVerEl) aboutVerEl.textContent = `v${v}`;
+
+        if (!s?.installed) {
+            setUpdaterPill('Updater module missing', 'bad');
+            setUpdaterStatus('electron-updater is not installed in this build.');
+            return;
+        }
+        if (!s?.packaged) {
+            setUpdaterPill('Dev mode', 'mute');
+            setUpdaterStatus('Updates only run in packaged installer builds, not under `npm start`.');
+            return;
+        }
+        if (s?.pendingUpdate) {
+            setUpdaterPill('Update ready', 'accent');
+            setUpdaterStatus(`v${s.pendingUpdate.version} downloaded. Click Restart & install when you're ready.`);
+            showInstallUpdateButton(s.pendingUpdate.version);
+        } else {
+            setUpdaterPill('Up to date', 'good');
+            setUpdaterStatus('No update pending. Auto-check runs every 6 hours.');
+            hideInstallUpdateButton();
+        }
+    } catch (e) {
+        setUpdaterPill('Status unknown', 'mute');
+        setUpdaterStatus(`Could not query updater: ${e?.message || e}`);
+    }
+}
+
+function handleUpdaterEvent(payload) {
+    if (!payload || typeof payload !== 'object') return;
+    switch (payload.type) {
+        case 'checking':
+            setUpdaterPill('Checking…', 'mute');
+            setUpdaterStatus('Contacting GitHub Releases…');
+            break;
+        case 'available':
+            setUpdaterPill('Downloading', 'accent');
+            setUpdaterStatus(`v${payload.version || '?'} is available. Downloading in background…`);
+            break;
+        case 'downloading': {
+            const pct = typeof payload.percent === 'number' ? payload.percent : 0;
+            setUpdaterPill(`${pct}%`, 'accent');
+            const kbps = payload.bytesPerSecond ? `${Math.round(payload.bytesPerSecond / 1024)} KB/s` : '';
+            setUpdaterStatus(`Downloading… ${pct}%${kbps ? ` (${kbps})` : ''}`);
+            break;
+        }
+        case 'downloaded':
+            setUpdaterPill('Update ready', 'accent');
+            setUpdaterStatus(`v${payload.version || '?'} downloaded. Click Restart & install when you're ready.`);
+            showInstallUpdateButton(payload.version);
+            break;
+        case 'up-to-date':
+            setUpdaterPill('Up to date', 'good');
+            setUpdaterStatus(`No update pending. Auto-check runs every 6 hours.`);
+            hideInstallUpdateButton();
+            break;
+        case 'error':
+            setUpdaterPill('Error', 'bad');
+            setUpdaterStatus(`Updater error: ${payload.message || 'unknown'}`);
+            break;
+    }
+}
+
+async function initSettingsUpdaterSection() {
+    if (!settingsUpdaterSubscribed && window.electronAPI?.onUpdaterEvent) {
+        window.electronAPI.onUpdaterEvent(handleUpdaterEvent);
+        settingsUpdaterSubscribed = true;
+    }
+    await refreshUpdaterCard();
+
+    document.getElementById('settings-check-update-btn')?.addEventListener('click', async () => {
+        setUpdaterPill('Checking…', 'mute');
+        setUpdaterStatus('Contacting GitHub Releases…');
+        try {
+            const r = await window.electronAPI.updaterCheckNow();
+            if (!r?.success) {
+                const friendly = r?.error === 'dev_mode'
+                    ? 'Updates only run in packaged installer builds.'
+                    : r?.error === 'updater_not_installed'
+                        ? 'electron-updater is not installed in this build.'
+                        : `Check failed: ${r?.error || 'unknown'}`;
+                setUpdaterPill('Check failed', 'bad');
+                setUpdaterStatus(friendly);
+            }
+            // Any actual success/up-to-date/available state will arrive via onUpdaterEvent.
+        } catch (e) {
+            setUpdaterPill('Check failed', 'bad');
+            setUpdaterStatus(`Check threw: ${e?.message || e}`);
+        }
+    });
+
+    document.getElementById('settings-install-update-btn')?.addEventListener('click', async () => {
+        const r = await window.electronAPI.updaterInstallNow();
+        if (!r?.success) {
+            setUpdaterPill('Install failed', 'bad');
+            setUpdaterStatus(`Could not install: ${r?.error || 'unknown'}`);
+        }
+        // On success the app quits and the installer takes over — no further UI to render.
+    });
+}
+
+async function initSettingsStartupSection() {
+    const toggle = document.getElementById('settings-startup-toggle');
+    const hint = document.getElementById('settings-startup-hint');
+    if (!toggle) return;
+
+    const refresh = async () => {
+        try {
+            const s = await window.electronAPI.startupGet();
+            toggle.checked = !!s?.openAtLogin;
+            toggle.disabled = !s?.canModify;
+            if (!s?.canModify) {
+                hint.textContent = s?.reason === 'dev_mode'
+                    ? "Startup toggle is read-only in dev mode (npm start). Run the installed build to change."
+                    : `Unable to manage startup item: ${s?.error || 'unknown'}`;
+                hint.style.color = 'var(--warn)';
+            } else {
+                hint.textContent = '\u00a0';
+                hint.style.color = 'var(--ink-3)';
+            }
+        } catch (e) {
+            hint.textContent = `Could not read startup state: ${e?.message || e}`;
+            hint.style.color = 'var(--bad)';
+        }
+    };
+
+    toggle.addEventListener('change', async () => {
+        const want = toggle.checked;
+        const r = await window.electronAPI.startupSet(want);
+        if (!r?.success) {
+            toggle.checked = !want; // revert
+            hint.textContent = `Failed to update startup: ${r?.error || 'unknown'}`;
+            hint.style.color = 'var(--bad)';
+        } else {
+            hint.textContent = want ? 'Will launch minimized at next sign-in.' : 'Will not auto-launch.';
+            hint.style.color = 'var(--good)';
+            setTimeout(() => { hint.textContent = '\u00a0'; hint.style.color = 'var(--ink-3)'; }, 4000);
+        }
+    });
+
+    await refresh();
+}
+
+async function initSettingsHudSection() {
+    const visibleEl = document.getElementById('settings-hud-visible');
+    const autoEl = document.getElementById('settings-hud-autohide');
+    const ctEl = document.getElementById('settings-hud-clickthrough');
+    if (!visibleEl || !autoEl || !ctEl) return;
+
+    try {
+        const cfg = await window.electronAPI.hudGetConfig();
+        visibleEl.checked = !!cfg.visible;
+        autoEl.checked = !!cfg.autoHideFullscreen;
+        ctEl.checked = !!cfg.clickThrough;
+    } catch (e) {
+        console.error('HUD config read failed:', e);
+    }
+
+    visibleEl.addEventListener('change', async () => {
+        if (visibleEl.checked) await window.electronAPI.hudShow();
+        else await window.electronAPI.hudHide();
+        await window.electronAPI.hudSetConfig({ visible: visibleEl.checked });
+    });
+    autoEl.addEventListener('change', async () => {
+        await window.electronAPI.hudSetConfig({ autoHideFullscreen: autoEl.checked });
+    });
+    ctEl.addEventListener('change', async () => {
+        await window.electronAPI.hudSetConfig({ clickThrough: ctEl.checked });
+    });
+}
+
+async function refreshSettingsPanel() {
+    // Lightweight refresh when the user clicks the Settings tab — re-pulls
+    // current updater status (in case auto-check happened in the background)
+    // and updates the visible state of HUD toggles. Startup and Reports are
+    // already initialized once at boot and stay in sync via their own
+    // change handlers.
+    await refreshUpdaterCard();
+    // HUD config can drift if the user toggled it via the tray menu.
+    try {
+        const cfg = await window.electronAPI.hudGetConfig();
+        const v = document.getElementById('settings-hud-visible');
+        const a = document.getElementById('settings-hud-autohide');
+        const c = document.getElementById('settings-hud-clickthrough');
+        if (v) v.checked = !!cfg.visible;
+        if (a) a.checked = !!cfg.autoHideFullscreen;
+        if (c) c.checked = !!cfg.clickThrough;
+    } catch (_) {}
+    // Reports panel timestamps refresh
+    await refreshReportSettings();
+}
+
+async function initSettingsPanel() {
+    await initSettingsUpdaterSection();
+    await initSettingsStartupSection();
+    await initSettingsHudSection();
 }
 
 // --- Commitment Modal Logic ---

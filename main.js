@@ -208,6 +208,19 @@ function scheduleNextMidnightRollover() {
 //      AND broadcast to the renderer so it can show an "Update ready — restart" pill.
 //   3. User can also trigger manual check via the tray menu or future UI button.
 
+/**
+ * Push a structured updater event to the renderer so the Settings panel can
+ * show a live status line (idle / checking / available / downloading-NN% /
+ * downloaded / error / up-to-date). Safe to call even before the window exists.
+ */
+function broadcastUpdaterEvent(type, payload = {}) {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        try {
+            mainWindow.webContents.send('updater-event', { type, at: Date.now(), ...payload });
+        } catch (_) {}
+    }
+}
+
 function notifyUpdateReady(info) {
     updaterReadyPayload = info;
     if (Notification.isSupported()) {
@@ -251,17 +264,30 @@ function setupAutoUpdater() {
         autoUpdater.logger.transports.file.level = 'info';
     }
 
-    autoUpdater.on('checking-for-update', () => console.log('Updater: checking…'));
+    autoUpdater.on('checking-for-update', () => {
+        console.log('Updater: checking…');
+        broadcastUpdaterEvent('checking');
+    });
     autoUpdater.on('update-available', (info) => {
         console.log(`Updater: update available — v${info?.version || '?'}`);
+        broadcastUpdaterEvent('available', { version: info?.version || null });
     });
-    autoUpdater.on('update-not-available', () => console.log('Updater: app is up to date.'));
-    autoUpdater.on('error', (err) => console.error('Updater error:', err?.message || err));
+    autoUpdater.on('update-not-available', () => {
+        console.log('Updater: app is up to date.');
+        broadcastUpdaterEvent('up-to-date');
+    });
+    autoUpdater.on('error', (err) => {
+        console.error('Updater error:', err?.message || err);
+        broadcastUpdaterEvent('error', { message: err?.message || String(err) });
+    });
     autoUpdater.on('download-progress', (p) => {
-        console.log(`Updater: downloading ${Math.round(p.percent)}%`);
+        const pct = Math.round(p.percent);
+        console.log(`Updater: downloading ${pct}%`);
+        broadcastUpdaterEvent('downloading', { percent: pct, bytesPerSecond: p.bytesPerSecond, total: p.total });
     });
     autoUpdater.on('update-downloaded', (info) => {
         console.log(`Updater: update downloaded — v${info?.version}`);
+        broadcastUpdaterEvent('downloaded', { version: info?.version || null });
         notifyUpdateReady(info);
     });
 
@@ -383,7 +409,18 @@ function createWindow() {
         },
     });
     mainWindow.loadFile('index.html');
-    
+
+    // Route any <a target="_blank"> or window.open(...) call (e.g. the "View
+    // all releases" link in Settings, or the GitHub source link in About) out
+    // to the user's default browser. Without this Electron silently swallows
+    // them since we have nodeIntegration off + no nested window handler.
+    mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+        if (/^https?:\/\//i.test(url)) {
+            shell.openExternal(url).catch(e => console.warn('openExternal failed:', e?.message || e));
+        }
+        return { action: 'deny' };
+    });
+
     // Handle window close event (hide to tray instead of quitting)
     mainWindow.on('close', (event) => {
         if (!isQuitting) {
@@ -1143,6 +1180,49 @@ ipcMain.handle('updater-get-status', async () => {
             releaseDate: updaterReadyPayload.releaseDate || null
         } : null
     };
+});
+
+// --- Startup / login item ---
+// app.getLoginItemSettings()/setLoginItemSettings() must be called with the
+// SAME args we registered the entry with on boot, otherwise the lookup will
+// fail to find it. We always register with ['--hidden'] in packaged builds.
+ipcMain.handle('startup-get', async () => {
+    if (!app.isPackaged) {
+        return {
+            openAtLogin: false,
+            canModify: false,
+            reason: 'dev_mode'
+        };
+    }
+    try {
+        const s = app.getLoginItemSettings({ args: ['--hidden'] });
+        return {
+            openAtLogin: !!s.openAtLogin,
+            wasOpenedAtLogin: !!s.wasOpenedAtLogin,
+            wasOpenedAsHidden: !!s.wasOpenedAsHidden,
+            canModify: true
+        };
+    } catch (e) {
+        return { openAtLogin: false, canModify: false, error: e?.message || String(e) };
+    }
+});
+
+ipcMain.handle('startup-set', async (_event, payload) => {
+    const openAtLogin = !!(payload && payload.openAtLogin);
+    if (!app.isPackaged) {
+        return { success: false, error: 'dev_mode_disabled' };
+    }
+    try {
+        app.setLoginItemSettings({
+            openAtLogin,
+            openAsHidden: true,
+            args: ['--hidden']
+        });
+        console.log(`Main: startup-set -> openAtLogin=${openAtLogin}`);
+        return { success: true, openAtLogin };
+    } catch (e) {
+        return { success: false, error: e?.message || String(e) };
+    }
 });
 
 ipcMain.handle('open-report-folder', async () => {
