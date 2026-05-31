@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getCommitmentParagraph: () => ipcRenderer.invoke('get-commitment-paragraph'),
   getProgressiveFrictionConfig: () => ipcRenderer.invoke('get-progressive-friction-config'),
   setProgressiveFrictionConfig: (partial) => ipcRenderer.invoke('set-progressive-friction-config', partial),
+  getInsights: () => ipcRenderer.invoke('get-insights'),
   
   // --- Deep Work Mode ---
   startDeepWork: (durationInSeconds) => ipcRenderer.invoke('start-deep-work', durationInSeconds),

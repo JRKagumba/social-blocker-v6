@@ -616,6 +616,149 @@ class DataManager {
         return todayUnblocks;
     }
 
+    // ---------------- Insights ----------------
+    //
+    // Pragmatic, opinionated read-only helpers for the Insights tab.
+    // All return-shape-stable; missing data degrades to zeros, not crashes.
+
+    _isoDateForOffset(offsetFromToday = 0, anchor = new Date()) {
+        const d = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate());
+        d.setDate(d.getDate() + offsetFromToday);
+        return this.getLocalISODate(d);
+    }
+
+    /** Total social seconds for a single ISO date across ALL tracked sites. */
+    getDailyTotalSocialSeconds(isoDate) {
+        const usage = this.store.get(`usage.${isoDate}`, {});
+        let total = 0;
+        for (const k of Object.keys(usage)) {
+            const v = Number(usage[k]);
+            if (Number.isFinite(v)) total += v;
+        }
+        return total;
+    }
+
+    /**
+     * Find the hour (0-23) with the highest social usage on `isoDate` and
+     * return both the hour and its seconds. If no usage exists, return
+     * { hour: null, seconds: 0 }.
+     */
+    getMostDistractingHourForDay(isoDate) {
+        const allSiteSettings = this.getSiteSettings();
+        const totals = new Array(24).fill(0);
+        for (let hour = 0; hour < 24; hour++) {
+            for (const siteName in allSiteSettings) {
+                const v = Number(this.store.get(`hourlyUsage.${isoDate}.${siteName}.${hour}`, 0));
+                if (Number.isFinite(v)) totals[hour] += v;
+            }
+        }
+        let bestHour = null;
+        let bestSeconds = 0;
+        for (let h = 0; h < 24; h++) {
+            if (totals[h] > bestSeconds) { bestSeconds = totals[h]; bestHour = h; }
+        }
+        return { hour: bestHour, seconds: bestSeconds, hourlyTotals: totals };
+    }
+
+    /**
+     * Return per-day totals for the week containing (today + 7*weekOffset).
+     * weekOffset=0 -> current week (Mon..Sun), -1 -> last week, etc.
+     * Returns [{ date, dayOfWeek, seconds }] with exactly 7 entries.
+     */
+    getWeekTotals(weekOffset = 0, anchor = new Date()) {
+        // Find Monday of the target week using ISO weekday (1=Mon..7=Sun).
+        const a = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate());
+        const isoDow = (a.getDay() + 6) % 7; // 0=Mon..6=Sun
+        a.setDate(a.getDate() - isoDow + (weekOffset * 7));
+        const days = [];
+        for (let i = 0; i < 7; i++) {
+            const d = new Date(a.getFullYear(), a.getMonth(), a.getDate() + i);
+            const iso = this.getLocalISODate(d);
+            days.push({
+                date: iso,
+                dayOfWeek: i, // 0=Mon..6=Sun (ISO ordering)
+                seconds: this.getDailyTotalSocialSeconds(iso)
+            });
+        }
+        return days;
+    }
+
+    /**
+     * Chronological list of today's unblock events with their tier
+     * computed retroactively. The Nth unblock of the day gets tier = N.
+     * Returns [{ timestamp, siteName, tier, sentenceCount, cooldownSeconds }].
+     * Honors the progressive-friction config (when disabled, tier=0 for all).
+     */
+    getTodayFrictionTimeline() {
+        const today = this.getLocalISODate();
+        const history = this.getUnblockHistory()
+            .filter(e => typeof e?.timestamp === 'string' && e.timestamp.startsWith(today))
+            .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+        const cfg = this.getProgressiveFrictionConfig();
+        const DataManager = this.constructor;
+        return history.map((e, idx) => {
+            const policy = DataManager.computeFrictionPolicy(idx, { enabled: cfg.enabled });
+            return {
+                timestamp: e.timestamp,
+                siteName: e.siteName,
+                tier: policy.tier,
+                sentenceCount: policy.sentenceCount,
+                cooldownSeconds: policy.cooldownSeconds
+            };
+        });
+    }
+
+    /**
+     * High-level aggregator the renderer calls once. Keeps the renderer
+     * dumb (just renders what's here) and the main-process math centralized.
+     */
+    buildInsightsPayload(now = new Date()) {
+        const todayIso = this.getLocalISODate(now);
+        const todaySeconds = this.getDailyTotalSocialSeconds(todayIso);
+        const hour = this.getMostDistractingHourForDay(todayIso);
+        const thisWeek = this.getWeekTotals(0, now);
+        const lastWeek = this.getWeekTotals(-1, now);
+        const timeline = this.getTodayFrictionTimeline();
+        const todayUsageMap = this.store.get(`usage.${todayIso}`, {});
+
+        const thisWeekTotal = thisWeek.reduce((s, d) => s + d.seconds, 0);
+        const lastWeekTotal = lastWeek.reduce((s, d) => s + d.seconds, 0);
+        // Best/worst days for the week so far (only counting days with usage).
+        const usedDays = thisWeek.filter(d => d.seconds > 0);
+        const bestDay = usedDays.length
+            ? usedDays.reduce((min, d) => d.seconds < min.seconds ? d : min, usedDays[0])
+            : null;
+
+        // Top site today (for context on "what's eating my day").
+        let topSite = null;
+        for (const site of Object.keys(todayUsageMap)) {
+            const s = Number(todayUsageMap[site]) || 0;
+            if (s > 0 && (!topSite || s > topSite.seconds)) {
+                topSite = { siteName: site, seconds: s };
+            }
+        }
+
+        return {
+            today: {
+                date: todayIso,
+                totalSeconds: todaySeconds,
+                topSite,
+                unblockCount: timeline.length,
+                highestTier: timeline.reduce((m, t) => Math.max(m, t.tier), 0),
+                mostDistractingHour: hour
+            },
+            week: {
+                thisWeek,
+                lastWeek,
+                thisWeekTotal,
+                lastWeekTotal,
+                deltaSeconds: thisWeekTotal - lastWeekTotal,
+                bestDay
+            },
+            timeline
+        };
+    }
+
     // Heat Map Data
     getHeatMapData(days = 7) {
         const heatMapData = [];

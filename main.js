@@ -1207,6 +1207,10 @@ ipcMain.handle('get-history', async () => {
     return dataManager.getHistoryData();
 });
 
+ipcMain.handle('get-insights', async () => {
+    return dataManager.buildInsightsPayload(new Date());
+});
+
 ipcMain.handle('log-blocker-event', async (event, isEnabled) => {
     return dataManager.addBlockerEvent(isEnabled);
 });

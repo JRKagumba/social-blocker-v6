@@ -384,7 +384,7 @@
             </div>
             <nav class="flex items-center gap-1" aria-label="Tabs">
                 <button id="tab-dashboard" class="tab-btn tab-active">Dashboard</button>
-                <button id="tab-history"   class="tab-btn tab-inactive">History</button>
+                <button id="tab-history"   class="tab-btn tab-inactive">Insights</button>
                 <button id="tab-data"      class="tab-btn tab-inactive">Data</button>
                 <button id="tab-settings"  class="tab-btn tab-inactive">Settings</button>
             </nav>
@@ -550,6 +550,71 @@
                  HISTORY TAB
                  ==================================================== -->
             <div id="content-history" class="tab-content hidden">
+
+                <!-- =================== 4 KPI CARDS ==================== -->
+                <section class="grid grid-cols-2 gap-3 mb-4" style="grid-template-columns: repeat(4, 1fr);">
+                    <div class="panel p-4">
+                        <p class="label mb-1">Today</p>
+                        <p id="insight-kpi-today-total" class="num font-semibold"
+                           style="font-size: 22px; color: var(--ink);">&mdash;</p>
+                        <p id="insight-kpi-today-top" style="font-size: 11px; color: var(--ink-3); margin-top: 2px;">
+                            Total social time
+                        </p>
+                    </div>
+                    <div class="panel p-4">
+                        <p class="label mb-1">Unblocks today</p>
+                        <p id="insight-kpi-unblocks" class="num font-semibold"
+                           style="font-size: 22px; color: var(--ink);">&mdash;</p>
+                        <p id="insight-kpi-unblocks-detail" style="font-size: 11px; color: var(--ink-3); margin-top: 2px;">
+                            Highest friction tier today
+                        </p>
+                    </div>
+                    <div class="panel p-4">
+                        <p class="label mb-1">Peak hour today</p>
+                        <p id="insight-kpi-peak-hour" class="num font-semibold"
+                           style="font-size: 22px; color: var(--ink);">&mdash;</p>
+                        <p id="insight-kpi-peak-detail" style="font-size: 11px; color: var(--ink-3); margin-top: 2px;">
+                            Most distracting hour
+                        </p>
+                    </div>
+                    <div class="panel p-4">
+                        <p class="label mb-1">This week</p>
+                        <p id="insight-kpi-week-total" class="num font-semibold"
+                           style="font-size: 22px; color: var(--ink);">&mdash;</p>
+                        <p id="insight-kpi-week-delta" style="font-size: 11px; color: var(--ink-3); margin-top: 2px;">
+                            vs last week
+                        </p>
+                    </div>
+                </section>
+
+                <!-- =================== THIS WEEK BAR CHART ==================== -->
+                <section class="panel p-5 mb-4">
+                    <p class="label mb-1">Weekly comparison</p>
+                    <h2 class="font-semibold mb-1" style="font-size: 15px;">This week vs last week</h2>
+                    <p id="insight-week-best" style="color: var(--ink-3); font-size: 12px;" class="mb-4">
+                        &mdash;
+                    </p>
+                    <canvas id="insight-week-chart" height="140"></canvas>
+                </section>
+
+                <!-- =================== TODAY'S FRICTION TIMELINE ==================== -->
+                <section class="panel p-5 mb-4">
+                    <p class="label mb-1">Friction timeline</p>
+                    <h2 class="font-semibold mb-1" style="font-size: 15px;">Every unblock you made today</h2>
+                    <p style="color: var(--ink-3); font-size: 12px;" class="mb-4">
+                        Chronological. The tier badge shows what the friction modal asked for at the moment.
+                    </p>
+                    <ul id="insight-friction-timeline" class="list-none">
+                        <!-- Populated by renderer -->
+                    </ul>
+                    <p id="insight-friction-empty" class="hidden"
+                       style="color: var(--ink-3); font-size: 12px; font-style: italic; padding: 6px 0;">
+                        Nothing unblocked yet today. Keep it up.
+                    </p>
+                </section>
+
+                <!-- =================== ALL-TIME DATA (existing charts) ==================== -->
+                <p class="label mb-2" style="margin-top: 24px;">All-time data</p>
 
                 <section class="panel p-5 mb-4">
                     <p class="label mb-1">Blocker activity</p>

@@ -643,7 +643,88 @@ group('DataManager.getTodayUnblockTotal + progressive friction config', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 7) Summary
+// 7) Insights aggregator
+// ---------------------------------------------------------------------------
+group('DataManager insights helpers', () => {
+    const DataManager = require('../dataManager');
+    const dm = new DataManager();
+
+    // Clean slate for usage + unblocks.
+    dm.store.set('unblockHistory', []);
+    const today = dm.getLocalISODate();
+    const yesterday = (() => {
+        const d = new Date(); d.setDate(d.getDate() - 1);
+        return dm.getLocalISODate(d);
+    })();
+
+    // Seed today's usage: Reddit 30min, YouTube 10min.
+    dm.store.set(`usage.${today}`, { Reddit: 1800, YouTube: 600 });
+    // Seed yesterday too.
+    dm.store.set(`usage.${yesterday}`, { Reddit: 60 });
+
+    ok('getDailyTotalSocialSeconds sums all sites', dm.getDailyTotalSocialSeconds(today) === 2400,
+        dm.getDailyTotalSocialSeconds(today));
+    ok('getDailyTotalSocialSeconds zero for empty date',
+        dm.getDailyTotalSocialSeconds('1999-01-01') === 0);
+
+    // Seed hourly data: 10AM has the most traffic.
+    dm.store.set(`hourlyUsage.${today}.Reddit.10`, 1200);
+    dm.store.set(`hourlyUsage.${today}.YouTube.10`, 300);
+    dm.store.set(`hourlyUsage.${today}.Reddit.14`, 600);
+    const peak = dm.getMostDistractingHourForDay(today);
+    ok('getMostDistractingHourForDay finds 10AM', peak.hour === 10, peak);
+    ok('peak hour seconds is sum across sites at that hour', peak.seconds === 1500, peak);
+    ok('hourlyTotals is length 24', peak.hourlyTotals.length === 24);
+
+    const noUsageDay = dm.getMostDistractingHourForDay('1999-01-01');
+    ok('no-usage day returns null hour', noUsageDay.hour === null && noUsageDay.seconds === 0);
+
+    // Week math: 7 entries, Monday first.
+    const wk = dm.getWeekTotals(0);
+    ok('getWeekTotals returns 7 days', wk.length === 7);
+    ok('first day is Mon (dayOfWeek=0 ISO)', wk[0].dayOfWeek === 0);
+    ok('last day is Sun (dayOfWeek=6 ISO)', wk[6].dayOfWeek === 6);
+    ok('week includes today',
+        wk.some(d => d.date === today && d.seconds === 2400),
+        wk.map(d => `${d.date}:${d.seconds}`));
+
+    // Friction timeline: seed 3 unblocks today across two sites.
+    const ts = (h, m) => `${today}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00.000Z`;
+    dm.store.set('unblockHistory', [
+        { timestamp: ts(9, 0), siteName: 'Reddit' },
+        { timestamp: ts(10, 30), siteName: 'YouTube' },
+        { timestamp: ts(14, 15), siteName: 'Reddit' }
+    ]);
+    dm.setProgressiveFrictionConfig({ enabled: true });
+    const tl = dm.getTodayFrictionTimeline();
+    ok('timeline length matches today unblocks', tl.length === 3);
+    ok('timeline tiers escalate 1->2->3', tl[0].tier === 1 && tl[1].tier === 2 && tl[2].tier === 3,
+        tl.map(t => t.tier));
+    ok('timeline is chronological', tl[0].timestamp < tl[1].timestamp && tl[1].timestamp < tl[2].timestamp);
+
+    // Aggregator payload sanity.
+    const payload = dm.buildInsightsPayload();
+    ok('payload.today.totalSeconds matches', payload.today.totalSeconds === 2400);
+    ok('payload.today.unblockCount === 3', payload.today.unblockCount === 3);
+    ok('payload.today.highestTier === 3', payload.today.highestTier === 3);
+    ok('payload.today.topSite is Reddit', payload.today.topSite?.siteName === 'Reddit', payload.today.topSite);
+    ok('payload.today.mostDistractingHour.hour === 10', payload.today.mostDistractingHour.hour === 10);
+    ok('payload.week.thisWeekTotal includes today', payload.week.thisWeekTotal >= 2400);
+    // bestDay = LEAST social time in the week (most disciplined). Yesterday
+    // was seeded with 60s, today with 2400s — yesterday should win iff it
+    // falls in this week. (Test only meaningful when today != Monday; on
+    // Mondays yesterday is in the previous week.)
+    if (new Date().getDay() !== 1) {
+        ok('payload.week.bestDay finds lowest-usage day', payload.week.bestDay?.seconds === 60,
+            payload.week.bestDay);
+    } else {
+        ok('Monday edge case skipped (yesterday is in previous week)', true);
+    }
+    ok('payload.timeline length === 3', payload.timeline.length === 3);
+});
+
+// ---------------------------------------------------------------------------
+// 8) Summary
 // ---------------------------------------------------------------------------
 console.log('\n=========================================');
 console.log(`PASS: ${passed}   FAIL: ${failed}   WARN: ${warnings.length}`);

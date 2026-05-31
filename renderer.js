@@ -541,6 +541,190 @@ async function renderUnblocksChart() {
     });
 }
 
+// ---------------------------------------------------------------------------
+// Insights tab (KPI cards + week comparison + friction timeline)
+// ---------------------------------------------------------------------------
+// Single fetch from get-insights then render in passes. All renderers tolerate
+// nulls/empties so a fresh install with zero usage doesn't show broken cells.
+
+let insightWeekChartInstance = null;
+
+function formatDurationFromSeconds(seconds) {
+    const s = Math.max(0, Math.round(Number(seconds) || 0));
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    if (h > 0) return `${h}h ${m}m`;
+    if (m > 0) return `${m}m`;
+    if (s > 0) return `${s}s`;
+    return '0m';
+}
+
+function format12hLabel(hour) {
+    if (hour === null || hour === undefined) return null;
+    const h = ((hour + 11) % 12) + 1;
+    const period = hour >= 12 ? 'PM' : 'AM';
+    return `${h} ${period}`;
+}
+
+function renderInsightKpis(payload) {
+    const { today, week } = payload;
+
+    // Today's total + top site.
+    document.getElementById('insight-kpi-today-total').textContent =
+        formatDurationFromSeconds(today.totalSeconds);
+    document.getElementById('insight-kpi-today-top').textContent =
+        today.topSite
+            ? `Top: ${today.topSite.siteName} (${formatDurationFromSeconds(today.topSite.seconds)})`
+            : 'Total social time';
+
+    // Unblocks today + tier.
+    document.getElementById('insight-kpi-unblocks').textContent = String(today.unblockCount);
+    const tierLabel = today.highestTier > 0 ? `Highest tier hit: ${today.highestTier}` : 'No friction triggered yet';
+    document.getElementById('insight-kpi-unblocks-detail').textContent = tierLabel;
+
+    // Peak hour today.
+    const peakLabel = today.mostDistractingHour?.hour !== null
+        ? format12hLabel(today.mostDistractingHour.hour)
+        : '\u2014';
+    document.getElementById('insight-kpi-peak-hour').textContent = peakLabel;
+    document.getElementById('insight-kpi-peak-detail').textContent =
+        today.mostDistractingHour?.seconds > 0
+            ? `${formatDurationFromSeconds(today.mostDistractingHour.seconds)} in this hour`
+            : 'No usage logged yet';
+
+    // This week total + delta.
+    document.getElementById('insight-kpi-week-total').textContent =
+        formatDurationFromSeconds(week.thisWeekTotal);
+
+    const deltaEl = document.getElementById('insight-kpi-week-delta');
+    if (week.lastWeekTotal === 0 && week.thisWeekTotal === 0) {
+        deltaEl.textContent = 'No data yet';
+        deltaEl.style.color = 'var(--ink-3)';
+    } else if (week.lastWeekTotal === 0) {
+        deltaEl.textContent = 'First week of data';
+        deltaEl.style.color = 'var(--ink-3)';
+    } else {
+        const pct = Math.round((week.deltaSeconds / week.lastWeekTotal) * 100);
+        const arrow = week.deltaSeconds < 0 ? '\u2193' : (week.deltaSeconds > 0 ? '\u2191' : '\u2192');
+        const sign = week.deltaSeconds > 0 ? '+' : '';
+        deltaEl.textContent = `${arrow} ${sign}${pct}% vs last week`;
+        // Going down is GOOD here (less social time).
+        deltaEl.style.color = week.deltaSeconds < 0 ? 'var(--good)' : (week.deltaSeconds > 0 ? 'var(--bad)' : 'var(--ink-3)');
+    }
+}
+
+function renderInsightWeekChart(payload) {
+    const canvas = document.getElementById('insight-week-chart');
+    if (!canvas || typeof Chart === 'undefined') return;
+    const ctx = canvas.getContext('2d');
+
+    const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    const thisWeekMins = payload.week.thisWeek.map(d => Math.round(d.seconds / 60));
+    const lastWeekMins = payload.week.lastWeek.map(d => Math.round(d.seconds / 60));
+
+    if (insightWeekChartInstance) insightWeekChartInstance.destroy();
+    insightWeekChartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels,
+            datasets: [
+                {
+                    label: 'Last week',
+                    data: lastWeekMins,
+                    backgroundColor: 'rgba(120, 134, 165, 0.45)',
+                    borderRadius: 4
+                },
+                {
+                    label: 'This week',
+                    data: thisWeekMins,
+                    backgroundColor: 'rgba(94, 106, 210, 0.85)',
+                    borderRadius: 4
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { labels: { color: '#aab0c5', font: { size: 11 } } },
+                tooltip: {
+                    callbacks: { label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y}m` }
+                }
+            },
+            scales: {
+                x: { ticks: { color: '#7886a5', font: { size: 11 } }, grid: { display: false } },
+                y: {
+                    ticks: { color: '#7886a5', font: { size: 11 }, callback: (v) => `${v}m` },
+                    grid: { color: 'rgba(120, 134, 165, 0.15)' }
+                }
+            }
+        }
+    });
+
+    const bestEl = document.getElementById('insight-week-best');
+    if (payload.week.bestDay) {
+        const labelIdx = payload.week.bestDay.dayOfWeek;
+        bestEl.textContent =
+            `Best day this week: ${labels[labelIdx]} (${formatDurationFromSeconds(payload.week.bestDay.seconds)})`;
+    } else {
+        bestEl.textContent = 'No usage logged yet this week.';
+    }
+}
+
+function renderFrictionTimeline(payload) {
+    const list = document.getElementById('insight-friction-timeline');
+    const empty = document.getElementById('insight-friction-empty');
+    if (!list || !empty) return;
+
+    if (!payload.timeline || payload.timeline.length === 0) {
+        list.innerHTML = '';
+        empty.classList.remove('hidden');
+        return;
+    }
+    empty.classList.add('hidden');
+
+    list.innerHTML = payload.timeline.map(t => {
+        const time = new Date(t.timestamp).toLocaleTimeString(undefined, {
+            hour: 'numeric', minute: '2-digit'
+        });
+        const tierColor = t.tier >= 4 ? 'var(--warn)' : (t.tier >= 3 ? 'var(--accent-2)' : 'var(--ink-2)');
+        const cooldownStr = t.cooldownSeconds > 0 ? ` \u00b7 ${t.cooldownSeconds}s cooldown` : '';
+        const sentenceStr = t.tier === 5 ? 'full paragraph' : `${t.sentenceCount} sentence${t.sentenceCount === 1 ? '' : 's'}`;
+        const safeSite = String(t.siteName).replace(/</g, '&lt;');
+        return `
+            <li class="row flex items-center gap-3 py-2.5">
+                <span class="num" style="color: var(--ink-3); font-size: 11px; width: 55px;">${time}</span>
+                <div class="flex-1 min-w-0">
+                    <div class="font-semibold" style="font-size: 13px; color: var(--ink);">${safeSite}</div>
+                    <div class="num" style="font-size: 11px; color: var(--ink-3); margin-top: 1px;">
+                        Required: ${sentenceStr}${cooldownStr}
+                    </div>
+                </div>
+                <span class="num"
+                      style="font-size: 11px; padding: 2px 9px; border-radius: 999px;
+                             border: 1px solid ${tierColor}; color: ${tierColor};">
+                    Tier ${t.tier}
+                </span>
+            </li>
+        `;
+    }).join('');
+}
+
+async function renderInsightsTab() {
+    let payload;
+    try {
+        payload = await window.electronAPI.getInsights();
+    } catch (e) {
+        console.error('renderInsightsTab fetch failed:', e);
+        return;
+    }
+    if (!payload) return;
+
+    renderInsightKpis(payload);
+    renderInsightWeekChart(payload);
+    renderFrictionTimeline(payload);
+}
+
 async function renderUsageChart() {
     const usageData = await window.electronAPI.getInitialData();
     const todayUsage = usageData.usageData;
@@ -903,12 +1087,13 @@ function setupEventListeners() {
             // Run validation on page load
             validateDeepWorkInputs();
     tabs.dashboard.addEventListener('click', () => showTab('dashboard'));
-    tabs.history.addEventListener('click', async () => { 
+    tabs.history.addEventListener('click', async () => {
+        await renderInsightsTab();
         await renderHistoryChart();
         await renderUnblocksTable();
         await renderUnblocksChart();
         await renderUsageChart();
-        showTab('history'); 
+        showTab('history');
     });
     tabs.data.addEventListener('click', async () => { 
         await renderDataTab(); 
