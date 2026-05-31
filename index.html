@@ -132,7 +132,15 @@
             border-color: var(--accent);
             box-shadow: 0 0 0 1px var(--accent);
         }
-        input[type="number"]::-webkit-inner-spin-button { opacity: 1; }
+        /* Kill the native Windows number-input spinners; they clash hard with
+           the Linear aesthetic. Users can still type, use up/down arrow keys
+           when focused, or scroll-wheel to nudge the value. */
+        input[type="number"]::-webkit-inner-spin-button,
+        input[type="number"]::-webkit-outer-spin-button {
+            -webkit-appearance: none;
+            appearance: none;
+            margin: 0;
+        }
         input[type="checkbox"] { accent-color: var(--accent); }
 
         /* Buttons */
@@ -225,13 +233,28 @@
         input.individual-toggle:disabled ~ .toggle-bg { background: var(--line); opacity: 0.5; }
         input.individual-toggle:disabled ~ .toggle-dot { background: var(--ink-4); opacity: 0.6; }
 
-        /* Limit input inside site rows (smaller, inline). */
+        /* Limit input inside site rows: feels like a click-to-edit cell.
+           Borderless at rest, subtle bg on hover, full focus ring when active. */
         .limit-input {
             width: 46px !important;
-            text-align: center;
+            text-align: right;
             padding: 2px 6px !important;
             font-size: 12px !important;
+            background: transparent !important;
+            border: 1px solid transparent !important;
+            box-shadow: none !important;
+            color: var(--ink) !important;
+            border-radius: 4px;
+            transition: background-color 0.12s, border-color 0.12s;
+        }
+        .limit-input:hover {
+            background: var(--panel-2) !important;
+            border-color: var(--line) !important;
+        }
+        .limit-input:focus {
             background: var(--bg-2) !important;
+            border-color: var(--accent) !important;
+            box-shadow: 0 0 0 1px var(--accent) !important;
         }
 
         /* Status dot prefix on each site row */

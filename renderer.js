@@ -315,11 +315,13 @@ function renderSiteList(blockedDomains, usageData, manualLocks = {}, today = nul
             <div style="width:96px;" class="num" >
                 <span class="usage-text" data-site-name="${site.name}" style="color:var(--ink); font-size:12px;">${usageInMinutes.toFixed(1)}m</span>
             </div>
-            <div style="width:60px;" class="flex items-center">
+            <div style="width:60px;" class="flex items-center justify-end gap-1">
                 <input type="number" value="${site.limit}" min="0"
                        class="limit-input num"
                        data-site-name="${site.name}"
-                       data-old-value="${site.limit}">
+                       data-old-value="${site.limit}"
+                       title="Click to edit. Use arrow keys or scroll-wheel to nudge.">
+                <span style="color: var(--ink-3); font-size: 11px;">m</span>
             </div>
             <div style="width:100px;" class="pr-3">
                 <div style="height:4px; background:var(--line); border-radius:2px; overflow:hidden;">
