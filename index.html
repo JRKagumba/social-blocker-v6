@@ -118,19 +118,33 @@
         }
 
         /* Inputs */
-        input[type="number"], input[type="text"], textarea, select {
+        input[type="number"], input[type="text"], input[type="time"], textarea, select {
             background: var(--bg-2);
             border: 1px solid var(--line);
             color: var(--ink);
+            /* Tell Chromium to render native UI chrome (time picker, AM/PM
+               dropdown, spinners) in dark mode so they match our palette. */
+            color-scheme: dark;
             border-radius: 6px;
             padding: 6px 9px;
             font-size: 13px;
             font-family: inherit;
         }
-        input[type="number"]:focus, input[type="text"]:focus, textarea:focus, select:focus {
+        input[type="number"]:focus, input[type="text"]:focus, input[type="time"]:focus, textarea:focus, select:focus {
             outline: none;
             border-color: var(--accent);
             box-shadow: 0 0 0 1px var(--accent);
+        }
+
+        /* The native clock icon next to <input type="time"> renders dark
+           by default — invert it so it's visible on our dark background. */
+        input[type="time"]::-webkit-calendar-picker-indicator {
+            filter: invert(1) brightness(1.2);
+            opacity: 0.7;
+            cursor: pointer;
+        }
+        input[type="time"]::-webkit-calendar-picker-indicator:hover {
+            opacity: 1;
         }
         /* Kill the native Windows number-input spinners; they clash hard with
            the Linear aesthetic. Users can still type, use up/down arrow keys
@@ -304,6 +318,20 @@
             display: flex; align-items: center; justify-content: center;
         }
         #commitment-modal.hidden { display: none; }
+
+        /* Schedule modal — same hide/show pattern as commitment-modal.
+           Inline display:flex on the markup would override Tailwind's
+           .hidden { display:none } because inline styles win on specificity;
+           keep everything in stylesheet rules so .hidden actually works. */
+        #schedule-modal {
+            position: fixed; inset: 0;
+            background: rgba(0,0,0,0.75);
+            backdrop-filter: blur(4px);
+            z-index: 60;
+            display: flex; align-items: center; justify-content: center;
+        }
+        #schedule-modal.hidden { display: none; }
+
         #commitment-modal #modal-content {
             background: var(--panel);
             border: 1px solid var(--line);
@@ -887,10 +915,7 @@
     <!-- ====================================================
          SCHEDULE RULE EDITOR MODAL
          ==================================================== -->
-    <div id="schedule-modal" class="hidden"
-         style="position:fixed; inset:0; background:rgba(0,0,0,0.75);
-                backdrop-filter:blur(4px); z-index:60;
-                display:flex; align-items:center; justify-content:center;">
+    <div id="schedule-modal" class="hidden">
         <div id="schedule-modal-content"
              style="background: var(--panel); border: 1px solid var(--line);
                     border-radius: 10px; padding: 24px; max-width: 480px; width: 90%;">
