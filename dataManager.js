@@ -1075,6 +1075,22 @@ class DataManager {
         }
     }
 
+    /**
+     * Two rules are considered "the same rule" if their semantic fingerprint
+     * matches: name + days set + startTime + durationMinutes. We ignore id,
+     * enabled, and lastFiredOn since none of those change the rule's intent.
+     */
+    static _ruleFingerprint(r) {
+        if (!r) return '';
+        const days = Array.isArray(r.days) ? [...r.days].sort().join(',') : '';
+        return JSON.stringify({
+            name: String(r.name || '').trim(),
+            days,
+            startTime: r.startTime || '',
+            durationMinutes: Number(r.durationMinutes) || 0
+        });
+    }
+
     addScheduleRule(partial) {
         const rules = this.getDeepWorkSchedule();
         const rule = {
@@ -1086,8 +1102,41 @@ class DataManager {
             durationMinutes: partial?.durationMinutes || 60,
             lastFiredOn: null
         };
+        // Dedup guard: if a rule with the same name+days+startTime+duration
+        // already exists, return the existing list unchanged. Prevents the
+        // "rapid double-click creates two identical rules" failure mode and
+        // also catches users who simply forget they already added it.
+        const fp = DataManager._ruleFingerprint(rule);
+        const existingIdx = rules.findIndex(r => DataManager._ruleFingerprint(r) === fp);
+        if (existingIdx !== -1) {
+            return rules;
+        }
         rules.push(rule);
         return this.setDeepWorkSchedule(rules);
+    }
+
+    /**
+     * Returns whether a rule with this exact fingerprint already exists.
+     * Used by the renderer to show a "Rule already exists" message before
+     * the user wastes a click. The IPC handler also checks server-side.
+     */
+    scheduleRuleExists(partial) {
+        const fp = DataManager._ruleFingerprint({
+            name: partial?.name || 'Untitled',
+            days: partial?.days || [],
+            startTime: partial?.startTime || '09:00',
+            durationMinutes: partial?.durationMinutes || 60
+        });
+        return this.getDeepWorkSchedule().some(r => DataManager._ruleFingerprint(r) === fp);
+    }
+
+    /**
+     * Wipe every schedule rule. Used by the "Delete all" bulk-action button.
+     * No undo - this is a deliberately destructive cleanup helper.
+     */
+    clearDeepWorkSchedule() {
+        this.store.set('deepWorkSchedule', []);
+        return [];
     }
 
     updateScheduleRule(id, partial) {

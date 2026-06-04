@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   scheduleAdd:    (rule) => ipcRenderer.invoke('schedule-add', rule),
   scheduleUpdate: (id, changes) => ipcRenderer.invoke('schedule-update', { id, changes }),
   scheduleDelete: (id) => ipcRenderer.invoke('schedule-delete', { id }),
+  scheduleClearAll: () => ipcRenderer.invoke('schedule-clear-all'),
   
   // --- History and Logging ---
   getHistory: () => ipcRenderer.invoke('get-history'),

@@ -50,10 +50,32 @@ const SCHEDULE_EVAL_INTERVAL_MS = 30 * 1000; // tick every 30s
 const SCHEDULE_GRACE_MINUTES = 5;            // late-fire allowance after scheduled time
 
 // --- Commitment Paragraphs ---
+//
+// Pool intentionally large + thematically consistent (discipline / focus /
+// long-term thinking). Why so many? With only 3, the user memorizes the
+// first sentence of each and the typing requirement becomes trivial. With
+// 17, hitting the same paragraph back-to-back is rare, and even on
+// repeats the user has to actually read to confirm. The friction layer
+// is `paste/drop/cut/contextmenu` blocked in renderer.js — these
+// paragraphs only have to slow you down enough to interrupt the impulse.
 const commitmentParagraphs = [
     "Discipline is the bridge between goals and accomplishment. It is the refusal to be swayed by momentary comfort or fleeting distraction. By choosing this path, I am not punishing myself; I am investing in my future self. Every second I reclaim from mindless scrolling is a second I can dedicate to building the career, the skills, and the life I truly desire. This deliberate act of focus is a declaration that my long-term ambitions are more valuable than my short-term impulses.",
     "The path to excellence is paved with focused effort, not scattered attention. True progress is measured in deliberate, concentrated work sessions where the noise of the world fades away. I am committing to this focus not out of obligation, but out of respect for my own potential. I recognize that my greatest breakthroughs will not come from passive consumption, but from active creation. This time is a sanctuary for deep thought and meaningful execution. I will protect it fiercely.",
-    "Motivation is what gets you started; habit is what keeps you going. I am building the habit of discipline. This choice is a conscious repetition of an action that aligns with my highest values. It is the practice of prioritizing the important over the urgent, the meaningful over the trivial. I understand that the discomfort of this restriction is temporary, while the rewards of the work I am about to do will compound and last a lifetime. I am the architect of my habits and the master of my time."
+    "Motivation is what gets you started; habit is what keeps you going. I am building the habit of discipline. This choice is a conscious repetition of an action that aligns with my highest values. It is the practice of prioritizing the important over the urgent, the meaningful over the trivial. I understand that the discomfort of this restriction is temporary, while the rewards of the work I am about to do will compound and last a lifetime. I am the architect of my habits and the master of my time.",
+    "The impulse I feel right now is not me. It is a pattern, a reflex carved into my brain by years of seeking small rewards. The real me wants the work, the growth, the quiet pride of an evening well spent. Each time I pause and choose the harder path, I weaken the pattern and strengthen the self I want to become. This moment of friction is not the obstacle to my goals; it is the path itself, one decision at a time.",
+    "I am not entitled to ease. Anything worth building demands a tax in attention, in patience, in the deliberate refusal of cheaper options. By honouring that tax today, I make tomorrow easier. By dodging it, I make tomorrow harder. There is no third option, no clever workaround, no version of growth that does not cost something. I choose to pay the cost now while I have the strength.",
+    "Future me is watching this moment. Not with anger, but with quiet hope that I will respect the time we have. He knows the regrets that come from frittered hours and the deep satisfaction of a day actually lived. I will not let him down for the sake of a feed designed by strangers to keep him scrolling. The smallest acts of discipline are the most meaningful gifts I can send forward in time.",
+    "Attention is the only currency I cannot earn back. I can sleep more, eat better, exercise harder, but the minutes spent in a dopamine trance are gone forever. Treating my focus as cheap means treating my life as cheap. I refuse to do that. The work I postpone today does not disappear; it simply waits for me, growing heavier each hour I delay it.",
+    "What I do when no one is watching is who I actually am. Right now no one knows I am at this decision point. No friend will praise me for closing this prompt and getting back to work, and no boss will discover the small surrender. The reward and the punishment are both internal, which is exactly why this choice matters more than the loud public ones I make.",
+    "The best version of my life is on the other side of consistent small refusals. Not heroic feats, not dramatic transformations, just thousands of unremarkable moments where I chose the thing that mattered over the thing that pulled. I cannot skip those moments and arrive at the destination. The moments are the destination, repeated until they become a life.",
+    "Resistance is loudest right before something good happens. The urge to abandon the work tends to peak just as I approach a breakthrough, because my brain mistakes effort for danger. The discomfort I feel is not a signal to stop; it is often the most reliable signal that I am on the right path. I will treat the discomfort as a compass rather than a verdict.",
+    "I trade hours for outcomes, whether I notice it or not. An hour of scrolling buys me a brief mood lift and a vague sense of having missed something. An hour of focused work buys me a piece of skill, a fragment of a project, a small but real claim on the person I am becoming. The exchange rate is brutally clear when I am honest about it.",
+    "Nothing on a screen is more important than the next thing on my list. Not because the world is uninteresting, but because curated outrage and curated joy and curated everything else were engineered to feel important while costing me nothing they value and everything I value. I will not subsidise their business model with my one finite life.",
+    "I respect myself enough to be a little bored. Boredom is the soil where ideas grow, where my mind connects things it could not connect while distracted. Every time I pull out a phone to avoid two empty minutes, I am poisoning that soil. The willingness to sit in a small silence is a quietly radical act in an economy designed to prevent it.",
+    "The rules I set for myself when I was thinking clearly deserve more weight than the rules I want to break when I am tired. Past me did not impose this limit out of cruelty. He imposed it because he had seen this exact scenario play out a hundred times and knew how it ends. I will trust the version of me who could think straight, not the version desperate for a quick hit.",
+    "Excellence is not a single decision; it is a posture. It is the way I hold myself in moments like this, when the easy thing is one click away and the hard thing requires me to actually show up. Each time I choose the posture, it costs slightly less. Each time I abandon it, the next return is slightly more expensive. Compounding works in both directions.",
+    "The person I admire most would not be wrestling with this decision. They would have already returned to work. I do not have to become that person in a single day, but I can borrow their stance for the next sixty seconds. I will act as they would act, not because pretending is noble, but because acting is the only path that ever turns pretending into being.",
+    "There are two kinds of time: the kind that builds something and the kind that erases something. I am about to decide which kind the next hour will be. Building is rarely thrilling in the moment, but it is the only kind I will ever be proud of having spent. Erasing feels like rest but leaves nothing behind, not even the memory of having rested. I choose to build."
 ];
 
 // --- Main Window & App State ---
@@ -1176,7 +1198,13 @@ ipcMain.handle('schedule-get', async () => {
 });
 
 ipcMain.handle('schedule-add', async (_event, partial) => {
-    return dataManager.addScheduleRule(partial || {});
+    // Return both the rule list AND a duplicate flag so the renderer can show
+    // a "Rule already exists" toast instead of silently re-rendering the same
+    // list. Without this signal the user assumes the click was lost and clicks
+    // again, which historically caused 9 dupes to pile up.
+    const wasDuplicate = dataManager.scheduleRuleExists(partial || {});
+    const rules = dataManager.addScheduleRule(partial || {});
+    return { rules, duplicate: wasDuplicate };
 });
 
 ipcMain.handle('schedule-update', async (_event, payload) => {
@@ -1187,6 +1215,10 @@ ipcMain.handle('schedule-update', async (_event, payload) => {
 ipcMain.handle('schedule-delete', async (_event, payload) => {
     if (!payload || !payload.id) return dataManager.getDeepWorkSchedule();
     return dataManager.deleteScheduleRule(payload.id);
+});
+
+ipcMain.handle('schedule-clear-all', async () => {
+    return dataManager.clearDeepWorkSchedule();
 });
 
 ipcMain.handle('end-deep-work', async () => {

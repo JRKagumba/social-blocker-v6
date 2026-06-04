@@ -534,7 +534,14 @@
                         <div class="mt-5 pt-4" style="border-top: 1px solid var(--line);">
                             <div class="flex items-center justify-between mb-1">
                                 <h3 class="font-semibold" style="font-size:13px;">Auto-schedule</h3>
-                                <button id="schedule-add-btn" class="btn" style="padding: 3px 10px; font-size: 12px;">+ Add rule</button>
+                                <div class="flex items-center" style="gap: 6px;">
+                                    <button id="schedule-clear-all-btn" class="btn hidden"
+                                            style="padding: 3px 10px; font-size: 12px; color: var(--danger);"
+                                            title="Delete every scheduled rule (irreversible)">
+                                        Delete all
+                                    </button>
+                                    <button id="schedule-add-btn" class="btn" style="padding: 3px 10px; font-size: 12px;">+ Add rule</button>
+                                </div>
                             </div>
                             <p style="color: var(--ink-3); font-size: 11px;" class="mb-3">
                                 Recurring sessions that start automatically. Uses your Deep Work block list above.
@@ -622,7 +629,13 @@
                     <p id="insight-week-best" style="color: var(--ink-3); font-size: 12px;" class="mb-4">
                         &mdash;
                     </p>
-                    <canvas id="insight-week-chart" height="140"></canvas>
+                    <!-- Chart.js with `responsive: true, maintainAspectRatio: false` sizes
+                         the canvas to fill its parent. A fixed-height wrapper is required;
+                         without it the canvas grows on every render and the whole page
+                         scrolls infinitely. -->
+                    <div style="position: relative; height: 220px;">
+                        <canvas id="insight-week-chart"></canvas>
+                    </div>
                 </section>
 
                 <!-- =================== TODAY'S FRICTION TIMELINE ==================== -->
@@ -1009,9 +1022,15 @@
                 </div>
             </div>
 
+            <!-- user-select:none combined with the paste/drop/cut/contextmenu
+                 blocks in renderer.js closes the trivial copy-paste loophole.
+                 A determined user can still inspect the DOM, but the goal is to
+                 interrupt the impulse, not to win an arms race. -->
             <p id="commitment-paragraph"
                class="panel-2 p-4 mb-4 italic"
-               style="color: var(--ink-2); font-size: 13px; line-height: 1.55; user-select: all;">
+               style="color: var(--ink-2); font-size: 13px; line-height: 1.55;
+                      user-select: none; -webkit-user-select: none;
+                      -moz-user-select: none; -ms-user-select: none;">
                 <!-- Required-text portion populated by renderer; rest of paragraph faded -->
             </p>
             <textarea id="commitment-input" rows="6" class="w-full mb-4"

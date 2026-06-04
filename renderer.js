@@ -1107,9 +1107,16 @@ function setupEventListeners() {
     cancelCommitmentBtn.addEventListener('click', () => closeCommitmentModal(true));
     confirmCommitmentBtn.addEventListener('click', confirmCommitment);
     commitmentInput.addEventListener('input', validateCommitmentInput);
-    commitmentInput.addEventListener('keydown', (e) => { 
-        if (e.key === 'Backspace') e.preventDefault(); 
+    commitmentInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Backspace') e.preventDefault();
     });
+    // Close the copy-paste loophole. Paste fires a 'paste' event, not 'keydown',
+    // so the Backspace block above didn't catch it. Same goes for drag-and-drop
+    // text from elsewhere on screen and the right-click context menu.
+    ['paste', 'drop', 'cut'].forEach(ev => {
+        commitmentInput.addEventListener(ev, (e) => e.preventDefault());
+    });
+    commitmentInput.addEventListener('contextmenu', (e) => e.preventDefault());
 }
 
 // --- Handlers & Core Logic ---
@@ -1346,10 +1353,12 @@ function renderDeepWorkEditor() {
     if (!defaultsContainer || !chipsContainer) return;
 
     // Available choices = every key in siteSettings PLUS each special site (Messenger, etc.)
-    const choiceNames = [
+    // Dedup by name — Messenger lives in BOTH registries (first-class tracker + special-domain
+    // bundle for whatsapp web), and without this it would render twice in the editor.
+    const choiceNames = Array.from(new Set([
         ...Object.keys(siteSettings),
         ...Object.keys(deepWorkSpecialCache || {})
-    ];
+    ]));
     const selectedSet = new Set(deepWorkConfigCache.selectedSites || []);
 
     defaultsContainer.innerHTML = choiceNames.map(name => {
@@ -1582,7 +1591,15 @@ function renderScheduleList() {
     const listEl = document.getElementById('schedule-rule-list');
     const emptyEl = document.getElementById('schedule-empty-state');
     const nextEl = document.getElementById('schedule-next-fire');
+    const clearAllBtn = document.getElementById('schedule-clear-all-btn');
     if (!listEl || !emptyEl || !nextEl) return;
+
+    // Only show "Delete all" when there's actually something to delete. Keeps the
+    // header clean and makes the button feel like a remediation tool rather than
+    // a permanent destructive surface.
+    if (clearAllBtn) {
+        clearAllBtn.classList.toggle('hidden', scheduleState.rules.length === 0);
+    }
 
     if (!scheduleState.rules.length) {
         listEl.innerHTML = '';
@@ -1725,19 +1742,54 @@ async function saveScheduleModal() {
         return;
     }
 
+    // Disable the Save button while the IPC round-trip is in flight. Without
+    // this, a rapid double-click was firing scheduleAdd twice before the first
+    // response came back, and on the old dedup-less code path that produced
+    // identical duplicate rules. The dataManager now also dedups by fingerprint,
+    // but disabling the button is the cleaner UX (no flicker, no toast on fast
+    // double-clicks).
+    const saveBtn = document.getElementById('schedule-modal-save');
+    if (saveBtn?.disabled) return; // belt-and-suspenders re-entry guard
+    if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.dataset.savingOriginalText = saveBtn.textContent;
+        saveBtn.textContent = 'Saving…';
+    }
+
     try {
+        let duplicate = false;
         if (scheduleState.editingId) {
             await window.electronAPI.scheduleUpdate(scheduleState.editingId, {
                 ...form, enabled: true
             });
         } else {
-            await window.electronAPI.scheduleAdd({ ...form, enabled: true });
+            const res = await window.electronAPI.scheduleAdd({ ...form, enabled: true });
+            // New IPC shape: { rules, duplicate }. Falls back gracefully for any
+            // older builds still returning the raw array.
+            if (res && typeof res === 'object' && !Array.isArray(res)) {
+                duplicate = !!res.duplicate;
+            }
         }
+
+        if (duplicate) {
+            errEl.textContent = 'A rule with the same name, days, start time, and duration already exists.';
+            errEl.classList.remove('hidden');
+            return; // leave modal open so user can edit then re-save
+        }
+
         closeScheduleModal();
         await reloadSchedule();
     } catch (e) {
         errEl.textContent = `Could not save: ${e?.message || e}`;
         errEl.classList.remove('hidden');
+    } finally {
+        if (saveBtn) {
+            saveBtn.disabled = false;
+            if (saveBtn.dataset.savingOriginalText) {
+                saveBtn.textContent = saveBtn.dataset.savingOriginalText;
+                delete saveBtn.dataset.savingOriginalText;
+            }
+        }
     }
 }
 
@@ -1793,6 +1845,23 @@ function initSchedulePanel(initialPayload) {
     });
 
     document.getElementById('schedule-add-btn')?.addEventListener('click', () => openScheduleModal(null));
+
+    // Bulk-delete-all. Two-step confirm: a generic confirm() prompt that requires
+    // explicit acknowledgement of how many rules are about to be wiped. There's
+    // no undo since the schedule store is overwritten with [].
+    document.getElementById('schedule-clear-all-btn')?.addEventListener('click', async () => {
+        const count = scheduleState.rules.length;
+        if (!count) return;
+        const msg = `Delete all ${count} scheduled session rule${count === 1 ? '' : 's'}?\n\nThis cannot be undone. Active Deep Work sessions (if any) will not be affected.`;
+        if (!confirm(msg)) return;
+        try {
+            await window.electronAPI.scheduleClearAll();
+            await reloadSchedule();
+        } catch (e) {
+            console.error('Schedule clear-all failed:', e);
+            alert(`Could not clear schedule: ${e?.message || e}`);
+        }
+    });
 
     // Modal controls.
     document.getElementById('schedule-modal-cancel')?.addEventListener('click', closeScheduleModal);

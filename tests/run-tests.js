@@ -569,6 +569,58 @@ group('DataManager.computeNextFireTime', () => {
 });
 
 // ---------------------------------------------------------------------------
+// 5b) Schedule dedup + bulk clear (v1.6.2 bug fixes)
+// ---------------------------------------------------------------------------
+group('DataManager.addScheduleRule dedup + clearDeepWorkSchedule', () => {
+    const DataManager = require('../dataManager');
+    const dm = new DataManager();
+    dm.store.set('deepWorkSchedule', []);
+
+    const ruleSpec = {
+        name: 'Morning focus', days: [1, 2, 3, 4, 5],
+        startTime: '09:00', durationMinutes: 180
+    };
+
+    const after1 = dm.addScheduleRule(ruleSpec);
+    ok('first add -> 1 rule', after1.length === 1, after1);
+
+    // Identical spec must NOT create a second rule. This is the regression
+    // guard for the v1.6.1 user report (rapid double-click made 9 dupes).
+    const after2 = dm.addScheduleRule(ruleSpec);
+    ok('identical spec dedups (still 1 rule)', after2.length === 1, after2);
+
+    // scheduleRuleExists should agree with addScheduleRule.
+    ok('scheduleRuleExists detects existing rule', dm.scheduleRuleExists(ruleSpec) === true);
+    ok('scheduleRuleExists rejects different startTime', dm.scheduleRuleExists({ ...ruleSpec, startTime: '10:00' }) === false);
+    ok('scheduleRuleExists rejects different duration', dm.scheduleRuleExists({ ...ruleSpec, durationMinutes: 60 }) === false);
+    ok('scheduleRuleExists rejects different days', dm.scheduleRuleExists({ ...ruleSpec, days: [6, 0] }) === false);
+
+    // Day-order shouldn't matter — dedup is order-insensitive.
+    const after3 = dm.addScheduleRule({ ...ruleSpec, days: [5, 4, 3, 2, 1] });
+    ok('day-order-reversed still dedups', after3.length === 1, after3);
+
+    // Whitespace normalization: " Morning focus " should match "Morning focus".
+    const after4 = dm.addScheduleRule({ ...ruleSpec, name: '  Morning focus  ' });
+    ok('name whitespace ignored in dedup', after4.length === 1, after4);
+
+    // A genuinely different rule should be added.
+    const after5 = dm.addScheduleRule({
+        name: 'Afternoon focus', days: [1, 2, 3, 4, 5],
+        startTime: '14:00', durationMinutes: 90
+    });
+    ok('genuinely different rule is added (now 2)', after5.length === 2, after5);
+
+    // Bulk clear wipes everything.
+    const after6 = dm.clearDeepWorkSchedule();
+    ok('clearDeepWorkSchedule returns []', Array.isArray(after6) && after6.length === 0, after6);
+    ok('store reflects empty schedule', dm.getDeepWorkSchedule().length === 0);
+
+    // After clear, the same rule can be added again (no ghost dedup state).
+    const after7 = dm.addScheduleRule(ruleSpec);
+    ok('clear releases dedup -> can re-add', after7.length === 1, after7);
+});
+
+// ---------------------------------------------------------------------------
 // 6) Progressive friction policy
 // ---------------------------------------------------------------------------
 group('DataManager.computeFrictionPolicy ladder', () => {

@@ -1,7 +1,7 @@
 {
     "name": "social-blocker-v6",
     "productName": "Social Blocker v6",
-    "version": "1.6.1",
+    "version": "1.6.2",
     "description": "A desktop social media blocker built with Electron.",
     "main": "main.js",
     "scripts": {
