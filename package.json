@@ -43,7 +43,8 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "Social-Blocker-v6-Setup-${version}.${ext}"
     },
     "publish": [
       {
