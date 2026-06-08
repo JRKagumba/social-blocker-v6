@@ -40,6 +40,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   phoneImportFolder: (folderPath) => ipcRenderer.invoke('phone-import-folder', folderPath),
   phoneClearAll: () => ipcRenderer.invoke('phone-clear-all'),
   getPhoneInsights: () => ipcRenderer.invoke('get-phone-insights'),
+
+  // --- Phone export reminder (v1.8.0) ---
+  phoneReminderGet: () => ipcRenderer.invoke('phone-reminder-get'),
+  phoneReminderSet: (partial) => ipcRenderer.invoke('phone-reminder-set', partial),
+  phoneReminderTestFire: () => ipcRenderer.invoke('phone-reminder-test-fire'),
+  onFocusPhoneSettings: (cb) => ipcRenderer.on('focus-phone-settings', cb),
   
   // --- History and Logging ---
   getHistory: () => ipcRenderer.invoke('get-history'),

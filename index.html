@@ -968,26 +968,31 @@
                         Read-only &mdash; this app can&rsquo;t block phone apps.
                     </p>
 
-                    <!-- Source picker. CSV folder is the only live option today;
-                         ADB-live-sync and StayFree-export entries are scaffolded
-                         disabled so the user knows what's coming. -->
+                    <!-- Supported sources. v1.8.0 auto-detects which parser
+                         to use from the folder contents, so this list is
+                         informational only (no radio selection needed). ADB
+                         live-sync is still planned. -->
                     <div class="panel-2 p-4 mb-3">
-                        <p class="label mb-2">Data source</p>
-                        <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
-                            <label class="flex items-center gap-2 cursor-pointer" style="font-size: 12px;">
-                                <input type="radio" name="phone-source" id="phone-source-csv"
-                                       value="csv" class="w-3.5 h-3.5" checked>
-                                <span style="color: var(--ink);">CSV folder import</span>
-                            </label>
-                            <label class="flex items-center gap-2 cursor-not-allowed opacity-50" style="font-size: 12px;">
-                                <input type="radio" name="phone-source" value="adb" class="w-3.5 h-3.5" disabled>
-                                <span>ADB live sync <span style="color: var(--ink-3);">(planned)</span></span>
-                            </label>
-                            <label class="flex items-center gap-2 cursor-not-allowed opacity-50" style="font-size: 12px;">
-                                <input type="radio" name="phone-source" value="stayfree" class="w-3.5 h-3.5" disabled>
-                                <span>StayFree export <span style="color: var(--ink-3);">(planned)</span></span>
-                            </label>
+                        <p class="label mb-2">Supported sources (auto-detected)</p>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-2" style="font-size: 12px;">
+                            <div class="flex items-center gap-2">
+                                <span style="color: var(--success); font-weight: 600;">&#10003;</span>
+                                <span style="color: var(--ink);">StayFree export</span>
+                                <span style="color: var(--ink-3);">(3 CSVs)</span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <span style="color: var(--success); font-weight: 600;">&#10003;</span>
+                                <span style="color: var(--ink);">Digital Wellbeing OCR</span>
+                                <span style="color: var(--ink-3);">(4 CSVs)</span>
+                            </div>
+                            <div class="flex items-center gap-2 opacity-50">
+                                <span style="color: var(--ink-3);">&middot;</span>
+                                <span style="color: var(--ink-3);">ADB live sync (planned)</span>
+                            </div>
                         </div>
+                        <p style="font-size: 11px; color: var(--ink-3);" class="mt-3">
+                            Pick a folder containing your CSVs; the importer figures out which format from the file names. If both source types are present, StayFree wins (direct OS measurement &gt; OCR).
+                        </p>
                     </div>
 
                     <!-- Status + import controls -->
@@ -1014,6 +1019,50 @@
                         <div id="phone-import-status" style="font-size: 12px; min-height: 1.25rem; color: var(--ink-3);">
                             &nbsp;
                         </div>
+                    </div>
+
+                    <!-- Weekly export reminder (v1.8.0).
+                         Until ADB live-sync ships, manual exports are the norm.
+                         A weekly notification keeps the data fresh without
+                         requiring you to remember the cadence. -->
+                    <div class="panel-2 p-4 mb-3">
+                        <p class="label mb-2">Weekly export reminder</p>
+                        <div class="flex items-center gap-3 mb-3">
+                            <label class="flex items-center gap-2 cursor-pointer" style="font-size: 12px;">
+                                <input type="checkbox" id="phone-reminder-enabled" class="w-3.5 h-3.5">
+                                <span style="color: var(--ink);">Enabled</span>
+                            </label>
+                        </div>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3" style="font-size: 12px;">
+                            <label>
+                                <span style="color: var(--ink-3); display:block; margin-bottom:4px;">Day of week</span>
+                                <select id="phone-reminder-day" class="num"
+                                        style="width:100%; background: var(--panel); border:1px solid var(--line); color: var(--ink); padding: 4px 8px; border-radius: 4px;">
+                                    <option value="0">Sunday</option>
+                                    <option value="1">Monday</option>
+                                    <option value="2">Tuesday</option>
+                                    <option value="3">Wednesday</option>
+                                    <option value="4">Thursday</option>
+                                    <option value="5">Friday</option>
+                                    <option value="6">Saturday</option>
+                                </select>
+                            </label>
+                            <label>
+                                <span style="color: var(--ink-3); display:block; margin-bottom:4px;">Hour (24h)</span>
+                                <select id="phone-reminder-hour" class="num"
+                                        style="width:100%; background: var(--panel); border:1px solid var(--line); color: var(--ink); padding: 4px 8px; border-radius: 4px;">
+                                    <!-- Populated by renderer (0-23). -->
+                                </select>
+                            </label>
+                            <div class="flex items-end">
+                                <button id="phone-reminder-test-btn" class="btn" style="padding: 4px 10px; font-size: 12px;">
+                                    Send test reminder
+                                </button>
+                            </div>
+                        </div>
+                        <p id="phone-reminder-status" style="font-size: 11px; color: var(--ink-3); min-height: 1.25rem;">
+                            &nbsp;
+                        </p>
                     </div>
 
                     <!-- Danger zone -->

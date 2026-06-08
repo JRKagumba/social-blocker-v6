@@ -161,6 +161,21 @@ window.addEventListener('DOMContentLoaded', async () => {
     await initSettingsPanel();
     // Ensure DW badges + disable states reflect any session that was already running at load.
     syncDeepWorkEditorActiveState(!!(initialData?.deepWork?.isActive), initialData?.deepWork?.remainingMs || 0);
+
+    // v1.8.0: when the user clicks the weekly phone-export reminder notification,
+    // main.js sends 'focus-phone-settings'. We switch to Settings tab and scroll
+    // the Phone Data section into view.
+    if (window.electronAPI.onFocusPhoneSettings) {
+        window.electronAPI.onFocusPhoneSettings(() => {
+            showTab('settings');
+            // Defer the scroll until after the tab content is laid out.
+            requestAnimationFrame(() => {
+                const target = document.getElementById('phone-pick-folder-btn');
+                if (target) target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            });
+        });
+    }
+
     showTab('dashboard');
 });
 
@@ -2368,6 +2383,10 @@ async function initSettingsPhonePanel() {
     const importStatus = document.getElementById('phone-import-status');
     if (!pickBtn) return;
 
+    // v1.8.0: wire the weekly export reminder controls. Idempotent — safe
+    // to call multiple times (we guard inside).
+    await initPhoneReminderControls();
+
     const refresh = async () => {
         try {
             const s = await window.electronAPI.phoneGetStatus();
@@ -2453,6 +2472,88 @@ async function initSettingsPhonePanel() {
     });
 
     await refresh();
+}
+
+// ---------------------------------------------------------------------------
+// Phone export reminder controls (v1.8.0)
+// ---------------------------------------------------------------------------
+// Settings -> Phone usage data -> Weekly export reminder. Lets the user pick
+// day-of-week + hour-of-day for a desktop notification reminding them to
+// export StayFree CSVs from their phone. Persists via IPC.
+async function initPhoneReminderControls() {
+    const enabled = document.getElementById('phone-reminder-enabled');
+    const daySel = document.getElementById('phone-reminder-day');
+    const hourSel = document.getElementById('phone-reminder-hour');
+    const testBtn = document.getElementById('phone-reminder-test-btn');
+    const statusEl = document.getElementById('phone-reminder-status');
+    if (!enabled || !daySel || !hourSel) return;
+
+    // Populate hour dropdown 0..23 with 12-hour-format labels for readability.
+    if (hourSel.options.length === 0) {
+        for (let h = 0; h < 24; h++) {
+            const opt = document.createElement('option');
+            opt.value = String(h);
+            const hr12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+            const ampm = h < 12 ? 'AM' : 'PM';
+            opt.textContent = `${String(h).padStart(2, '0')}:00 (${hr12} ${ampm})`;
+            hourSel.appendChild(opt);
+        }
+    }
+
+    const renderStatus = (cfg) => {
+        if (!cfg.enabled) {
+            statusEl.textContent = 'Reminder is off.';
+            return;
+        }
+        const dayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][cfg.dayOfWeek];
+        const hour12 = cfg.hour === 0 ? 12 : cfg.hour > 12 ? cfg.hour - 12 : cfg.hour;
+        const ampm = cfg.hour < 12 ? 'AM' : 'PM';
+        const lastFired = cfg.lastFiredOn ? ` Last fired: ${cfg.lastFiredOn}.` : '';
+        statusEl.textContent = `Reminder set for every ${dayName} at ${hour12}:00 ${ampm}.${lastFired}`;
+    };
+
+    try {
+        const cfg = await window.electronAPI.phoneReminderGet();
+        enabled.checked = !!cfg.enabled;
+        daySel.value = String(cfg.dayOfWeek);
+        hourSel.value = String(cfg.hour);
+        renderStatus(cfg);
+    } catch (e) {
+        console.error('phone-reminder-get failed:', e);
+    }
+
+    const persist = async () => {
+        try {
+            const next = await window.electronAPI.phoneReminderSet({
+                enabled: enabled.checked,
+                dayOfWeek: parseInt(daySel.value, 10),
+                hour: parseInt(hourSel.value, 10),
+            });
+            renderStatus(next);
+        } catch (e) {
+            statusEl.textContent = `Failed to save reminder: ${e?.message || e}`;
+        }
+    };
+
+    if (!initPhoneReminderControls.__wired) {
+        enabled.addEventListener('change', persist);
+        daySel.addEventListener('change', persist);
+        hourSel.addEventListener('change', persist);
+        if (testBtn) {
+            testBtn.addEventListener('click', async () => {
+                statusEl.textContent = 'Firing test reminder...';
+                try {
+                    const r = await window.electronAPI.phoneReminderTestFire();
+                    statusEl.textContent = r.success
+                        ? 'Test reminder sent. Check your desktop notifications.'
+                        : `Test failed: ${r.error || 'unknown'}`;
+                } catch (e) {
+                    statusEl.textContent = `Test failed: ${e?.message || e}`;
+                }
+            });
+        }
+        initPhoneReminderControls.__wired = true;
+    }
 }
 
 /**

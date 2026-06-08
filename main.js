@@ -422,6 +422,61 @@ function stopScheduleEvaluator() {
     }
 }
 
+// ============================================================
+// Phone export reminder evaluator (v1.8.0)
+// ------------------------------------------------------------
+// Runs alongside the Deep Work schedule evaluator. Fires a desktop
+// Notification at the configured day-of-week + hour, once per day max,
+// reminding the user to export StayFree CSVs from their phone.
+// State (lastFiredOn) lives in electron-store so the reminder survives
+// app restarts and won't double-fire if the app starts up after the
+// scheduled time has already passed.
+// ============================================================
+function evaluatePhoneReminder() {
+    try {
+        if (!dataManager.shouldFirePhoneReminderNow()) return;
+        const cfg = dataManager.getPhoneReminderConfig();
+        const dayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][cfg.dayOfWeek];
+        if (Notification.isSupported()) {
+            const n = new Notification({
+                title: 'Time to sync phone data',
+                body: `It's your weekly StayFree export day (${dayName}). Export from StayFree on your Pixel, then import in Social Blocker -> Settings -> Phone usage data.`,
+                silent: false,
+            });
+            n.on('click', () => {
+                if (mainWindow) {
+                    if (mainWindow.isMinimized()) mainWindow.restore();
+                    mainWindow.show();
+                    mainWindow.focus();
+                    // Send a message the renderer can use to scroll the
+                    // Settings tab + Phone Data section into view.
+                    mainWindow.webContents.send('focus-phone-settings');
+                }
+            });
+            n.show();
+        }
+        dataManager.markPhoneReminderFired();
+        console.log(`PhoneReminder: fired for ${dayName}`);
+    } catch (e) {
+        console.error('PhoneReminder evaluator error:', e);
+    }
+}
+
+let phoneReminderInterval = null;
+function startPhoneReminderEvaluator() {
+    if (phoneReminderInterval) clearInterval(phoneReminderInterval);
+    // Tick every 5 min — plenty granular for a weekly reminder, gentle on CPU.
+    evaluatePhoneReminder();
+    phoneReminderInterval = setInterval(evaluatePhoneReminder, 5 * 60 * 1000);
+    console.log('PhoneReminder: evaluator running every 5min.');
+}
+function stopPhoneReminderEvaluator() {
+    if (phoneReminderInterval) {
+        clearInterval(phoneReminderInterval);
+        phoneReminderInterval = null;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // DIGEST / REPORT GENERATION
 // ---------------------------------------------------------------------------
@@ -1035,6 +1090,7 @@ app.whenReady().then(() => {
     startDigestScheduler();
     setupAutoUpdater();
     startScheduleEvaluator();
+    startPhoneReminderEvaluator();
 
     // HUD: restore visibility from last session.
     if (dataManager.getHudConfig().visible) {
@@ -1230,6 +1286,37 @@ ipcMain.handle('schedule-clear-all', async () => {
 // without changing the storage layer or the renderer's status surface.
 // ============================================================
 const phoneCsvParser = require('./phoneCsvParser');
+const phoneStayFreeParser = require('./phoneStayFreeParser');
+
+/**
+ * Auto-detect which parser to use for an import folder. Looks at the files
+ * present and matches against either source's filename signature.
+ *
+ * Returns: { parser, sourceName } or { error }
+ * Precedence: if a folder somehow has BOTH source signatures, StayFree wins
+ * because it's the higher-quality source (direct OS measurement vs OCR).
+ */
+function detectPhoneSourceFormat(folderPath) {
+    try {
+        if (phoneStayFreeParser.looksLikeStayFreeBundle(folderPath)) {
+            return { parser: phoneStayFreeParser, sourceName: 'stayfree-export' };
+        }
+        // Digital Wellbeing fallback: look for any of its long-form CSV files.
+        const fs = require('fs');
+        const entries = fs.readdirSync(folderPath);
+        const looksLikeDW = entries.some(name =>
+            name.endsWith('Daily_Screen_Time.csv') ||
+            name.endsWith('Daily_Unlocks.csv') ||
+            name.endsWith('App_Screen_Time.csv') ||
+            name.endsWith('App_Opens.csv'));
+        if (looksLikeDW) {
+            return { parser: phoneCsvParser, sourceName: 'csv-folder-import' };
+        }
+        return { error: 'no_recognized_format', detail: 'Folder has no StayFree or Digital Wellbeing CSV files. Expected filenames containing "- Usage Time.csv" (StayFree) or "Daily_Screen_Time.csv" (Digital Wellbeing).' };
+    } catch (e) {
+        return { error: 'read_error', detail: e.message };
+    }
+}
 
 ipcMain.handle('phone-get-status', async () => {
     return dataManager.getPhoneStatus();
@@ -1261,12 +1348,19 @@ ipcMain.handle('phone-import-folder', async (_event, folderPath) => {
     if (!folderPath || typeof folderPath !== 'string') {
         return { success: false, error: 'no_folder' };
     }
+    // Auto-detect: StayFree-format folder OR Digital Wellbeing OCR folder.
+    // User picks a folder; we pick the parser. Avoids dropdown friction.
+    const detected = detectPhoneSourceFormat(folderPath);
+    if (detected.error) {
+        return { success: false, error: detected.error, detail: detected.detail };
+    }
     try {
-        const payload = phoneCsvParser.parseFolder(folderPath);
+        const payload = detected.parser.parseFolder(folderPath);
         payload.sourceFolder = folderPath;
         const summary = dataManager.importPhoneUsage(payload);
         return {
             success: true,
+            detectedSource: detected.sourceName,
             ...summary,
             status: dataManager.getPhoneStatus(),
         };
@@ -1278,6 +1372,44 @@ ipcMain.handle('phone-import-folder', async (_event, folderPath) => {
 ipcMain.handle('phone-clear-all', async () => {
     dataManager.clearPhoneUsage();
     return { success: true, status: dataManager.getPhoneStatus() };
+});
+
+ipcMain.handle('phone-reminder-get', async () => {
+    return dataManager.getPhoneReminderConfig();
+});
+
+ipcMain.handle('phone-reminder-set', async (_event, partial) => {
+    const next = dataManager.setPhoneReminderConfig(partial || {});
+    // Re-evaluate immediately so toggling on at the right day-of-week fires
+    // the reminder right away rather than waiting up to 5 minutes.
+    evaluatePhoneReminder();
+    return next;
+});
+
+/**
+ * Test-fire path: lets the user click "Send test reminder" in Settings to
+ * verify their OS allows the notification + see what it looks like. Bypasses
+ * the day-of-week / hour gates but doesn't update lastFiredOn.
+ */
+ipcMain.handle('phone-reminder-test-fire', async () => {
+    if (Notification.isSupported()) {
+        const n = new Notification({
+            title: 'Test: Phone export reminder',
+            body: 'This is what your weekly reminder will look like. Click to jump to Settings -> Phone usage data.',
+            silent: false,
+        });
+        n.on('click', () => {
+            if (mainWindow) {
+                if (mainWindow.isMinimized()) mainWindow.restore();
+                mainWindow.show();
+                mainWindow.focus();
+                mainWindow.webContents.send('focus-phone-settings');
+            }
+        });
+        n.show();
+        return { success: true };
+    }
+    return { success: false, error: 'Notifications not supported on this OS' };
 });
 
 /**

@@ -904,6 +904,168 @@ group('DataManager phone usage CRUD + helpers', () => {
 });
 
 // ---------------------------------------------------------------------------
+// 7c) StayFree parser (v1.8.0)
+// ---------------------------------------------------------------------------
+group('phoneStayFreeParser.parseStayFreeDate', () => {
+    const { parseStayFreeDate } = require('../phoneStayFreeParser');
+    ok('"May 12, 2026" -> 2026-05-12', parseStayFreeDate('May 12, 2026') === '2026-05-12');
+    ok('"June 1, 2026" -> 2026-06-01', parseStayFreeDate('June 1, 2026') === '2026-06-01');
+    ok('"January 5, 2026" -> 2026-01-05', parseStayFreeDate('January 5, 2026') === '2026-01-05');
+    ok('header "Device" returns null', parseStayFreeDate('Device') === null);
+    ok('header "Total Usage" returns null', parseStayFreeDate('Total Usage') === null);
+    ok('empty returns null', parseStayFreeDate('') === null);
+    ok('non-string returns null', parseStayFreeDate(null) === null);
+});
+
+group('phoneStayFreeParser.parseStayFreeDuration', () => {
+    const { parseStayFreeDuration } = require('../phoneStayFreeParser');
+    ok('"0s" -> 0', parseStayFreeDuration('0s') === 0);
+    ok('"29s" -> 0 (sub-30s rounds down)', parseStayFreeDuration('29s') === 0);
+    ok('"34s" -> 1 (>=30s rounds up)', parseStayFreeDuration('34s') === 1);
+    ok('"4m 50s" -> 5 (50s rounds 4 up to 5)', parseStayFreeDuration('4m 50s') === 5);
+    ok('"4m" -> 4', parseStayFreeDuration('4m') === 4);
+    ok('"1h 23m" -> 83', parseStayFreeDuration('1h 23m') === 83);
+    ok('"1h 23m 28s" -> 83 (28s rounds to 0)', parseStayFreeDuration('1h 23m 28s') === 83);
+    ok('"9h 57m 56s" -> 598', parseStayFreeDuration('9h 57m 56s') === 598);
+    ok('"5h" -> 300', parseStayFreeDuration('5h') === 300);
+    ok('"" -> 0', parseStayFreeDuration('') === 0);
+    ok('null -> 0', parseStayFreeDuration(null) === 0);
+    ok('"3h 53m 40s" -> 234', parseStayFreeDuration('3h 53m 40s') === 234);
+});
+
+group('phoneStayFreeParser.parseFolder (synthetic StayFree fixtures)', () => {
+    const path = require('path');
+    const { parseFolder, looksLikeStayFreeBundle } = require('../phoneStayFreeParser');
+    const fixtures = path.join(__dirname, 'phone-fixtures-stayfree');
+
+    ok('looksLikeStayFreeBundle detects fixture folder', looksLikeStayFreeBundle(fixtures));
+
+    const payload = parseFolder(fixtures);
+    ok('source = stayfree-export', payload.source === 'stayfree-export');
+    ok('payload contains 3 days', Object.keys(payload.days).length === 3, Object.keys(payload.days));
+
+    // Jan 5: YouTube 90 + Instagram 45 + Chrome 30 + Authenticator (5s+1m30s ~= 0+2=2) = 167
+    const jan5 = payload.days['2026-01-05'];
+    ok('Jan 5 unlocks === 42', jan5.unlocks === 42, jan5);
+    ok('Jan 5 YouTube minutes === 90', jan5.perApp.YouTube === 90, jan5.perApp);
+    ok('Jan 5 Instagram minutes === 45', jan5.perApp.Instagram === 45, jan5.perApp);
+    ok('Jan 5 Chrome minutes === 30', jan5.perApp.Chrome === 30, jan5.perApp);
+
+    // Authenticator: two rows summed. Row1 = 5s = 0min. Row2 = 1m30s = 2min (90s -> Math.round(90/60)=2).
+    // Sum = 0 + 2 = 2.
+    ok('Jan 5 Authenticator minutes === 2 (two rows summed)',
+        jan5.perApp.Authenticator === 2, jan5.perApp);
+
+    // Per-app opens: Authenticator 3 + 7 = 10 (summed across duplicate rows)
+    ok('Jan 5 Authenticator opens === 10 (summed)',
+        jan5.perAppOpens.Authenticator === 10, jan5.perAppOpens);
+    ok('Jan 5 YouTube opens === 12', jan5.perAppOpens.YouTube === 12);
+
+    // Jan 7 has only YouTube data (no opens, no unlocks beyond what's set).
+    const jan7 = payload.days['2026-01-07'];
+    ok('Jan 7 has YouTube 80 min only', jan7.perApp.YouTube === 80 && Object.keys(jan7.perApp).length === 1, jan7);
+    ok('Jan 7 unlocks === 38', jan7.unlocks === 38);
+
+    ok('Total Usage row excluded',
+        !Object.values(payload.days).some(d => 'Total Usage' in d.perApp));
+});
+
+group('phoneStayFreeParser empty-day filtering', () => {
+    // Verify that days with no data are dropped (mimics StayFree's pre-install
+    // date range where all-zero columns exist but mean "no data captured").
+    const path = require('path');
+    const { parseFolder } = require('../phoneStayFreeParser');
+    const payload = parseFolder(path.join(__dirname, 'phone-fixtures-stayfree'));
+    // Our fixture has Jan 5/6/7 with data; no zero-day to drop. Synthetic check:
+    // every returned day must have totalMinutes > 0 OR unlocks > 0.
+    const allHaveSomething = Object.values(payload.days).every(d =>
+        d.totalMinutes > 0 || d.unlocks > 0 || Object.keys(d.perAppOpens).length > 0);
+    ok('every returned day has at least one signal', allHaveSomething);
+});
+
+group('DataManager + StayFree integration (cross-source merge)', () => {
+    const path = require('path');
+    const DataManager = require('../dataManager');
+    const dwParser = require('../phoneCsvParser');
+    const sfParser = require('../phoneStayFreeParser');
+
+    const dm = new DataManager();
+    dm.clearPhoneUsage();
+
+    // First import: Digital Wellbeing fixture (Jan 5/6/7 = 3 days).
+    const dwPayload = dwParser.parseFolder(path.join(__dirname, 'phone-fixtures'));
+    dwPayload.sourceFolder = '/test/dw';
+    const r1 = dm.importPhoneUsage(dwPayload);
+    ok('DW import adds 3 days', r1.daysImported === 3, r1);
+
+    // Second import: StayFree fixture (also Jan 5/6/7). Should REPLACE all 3.
+    const sfPayload = sfParser.parseFolder(path.join(__dirname, 'phone-fixtures-stayfree'));
+    sfPayload.sourceFolder = '/test/stayfree';
+    const r2 = dm.importPhoneUsage(sfPayload);
+    ok('StayFree re-import replaces 3 days', r2.daysReplaced === 3 && r2.daysImported === 0, r2);
+
+    // After the second import, status should show stayfree-export source.
+    const status = dm.getPhoneStatus();
+    ok('status.source === stayfree-export after second import',
+        status.source === 'stayfree-export', status);
+
+    // Helper reads still work across source switch.
+    ok('getPhoneDailyTotalMinutes Jan 5 from StayFree fixture',
+        dm.getPhoneDailyTotalMinutes('2026-01-05') === 90 + 45 + 30 + 2);
+
+    dm.clearPhoneUsage();
+});
+
+// ---------------------------------------------------------------------------
+// 7d) Phone export reminder scheduler (v1.8.0)
+// ---------------------------------------------------------------------------
+group('DataManager phone export reminder', () => {
+    const DataManager = require('../dataManager');
+    const dm = new DataManager();
+
+    // Reset to defaults
+    dm.setPhoneReminderConfig({ enabled: false, dayOfWeek: 0, hour: 20, lastFiredOn: null });
+
+    const def = dm.getPhoneReminderConfig();
+    ok('defaults: disabled', def.enabled === false);
+    ok('defaults: dayOfWeek=0 (Sunday)', def.dayOfWeek === 0);
+    ok('defaults: hour=20', def.hour === 20);
+    ok('defaults: lastFiredOn=null', def.lastFiredOn === null);
+
+    // Range coercion: out-of-bounds inputs clamp into valid range.
+    const c1 = dm.setPhoneReminderConfig({ enabled: true, dayOfWeek: 99, hour: 99 });
+    ok('dayOfWeek clamps to 6', c1.dayOfWeek === 6, c1);
+    ok('hour clamps to 23', c1.hour === 23, c1);
+
+    // shouldFire predicate
+    dm.setPhoneReminderConfig({ enabled: false, dayOfWeek: 3, hour: 12, lastFiredOn: null });
+    const wedNoon = new Date(2026, 5, 10, 12, 0, 0); // Wed Jun 10 2026 12:00
+    ok('disabled => never fires', dm.shouldFirePhoneReminderNow(wedNoon) === false);
+
+    dm.setPhoneReminderConfig({ enabled: true, dayOfWeek: 3, hour: 12, lastFiredOn: null });
+    ok('Wed @ noon, Wed/12 config => fires', dm.shouldFirePhoneReminderNow(wedNoon) === true);
+
+    const wedMorning = new Date(2026, 5, 10, 11, 0, 0);
+    ok('Wed @ 11am, Wed/12 config => does NOT fire (too early)',
+        dm.shouldFirePhoneReminderNow(wedMorning) === false);
+
+    const tueNoon = new Date(2026, 5, 9, 12, 0, 0);
+    ok('Tue @ noon, Wed/12 config => does NOT fire (wrong day)',
+        dm.shouldFirePhoneReminderNow(tueNoon) === false);
+
+    // After firing, mark + verify it won't double-fire the same day.
+    dm.markPhoneReminderFired(wedNoon);
+    ok('after markFired Wed, won\'t fire again Wed afternoon',
+        dm.shouldFirePhoneReminderNow(new Date(2026, 5, 10, 14, 0, 0)) === false);
+    // But will fire next week.
+    ok('next Wed same time, fires again',
+        dm.shouldFirePhoneReminderNow(new Date(2026, 5, 17, 12, 0, 0)) === true);
+
+    // Cleanup
+    dm.setPhoneReminderConfig({ enabled: false, dayOfWeek: 0, hour: 20, lastFiredOn: null });
+});
+
+// ---------------------------------------------------------------------------
 // 8) Summary
 // ---------------------------------------------------------------------------
 console.log('\n=========================================');

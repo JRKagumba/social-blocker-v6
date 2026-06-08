@@ -1072,6 +1072,54 @@ class DataManager {
         return `${y}-${m}-${da}`;
     }
 
+    // ============================================================
+    // Phone export reminder (v1.8.0)
+    // ------------------------------------------------------------
+    // Until ADB live-sync exists, the user manually exports StayFree
+    // weekly. This config + the main-process scheduler fire a desktop
+    // notification at a chosen day-of-week + hour so they don't forget.
+    //
+    // Schema: { enabled, dayOfWeek (0=Sun..6=Sat), hour (0-23), lastFiredOn (ISO date) }
+    // ============================================================
+
+    getPhoneReminderConfig() {
+        const defaults = { enabled: false, dayOfWeek: 0, hour: 20, lastFiredOn: null }; // default Sun 8pm if enabled
+        const stored = this.store.get('phoneExportReminder', defaults) || {};
+        return { ...defaults, ...stored };
+    }
+
+    setPhoneReminderConfig(partial) {
+        const next = { ...this.getPhoneReminderConfig(), ...(partial || {}) };
+        // Coerce sane ranges so a corrupt config can't poison the scheduler.
+        next.dayOfWeek = Math.max(0, Math.min(6, parseInt(next.dayOfWeek, 10) || 0));
+        next.hour = Math.max(0, Math.min(23, parseInt(next.hour, 10) || 0));
+        next.enabled = !!next.enabled;
+        this.store.set('phoneExportReminder', next);
+        return next;
+    }
+
+    /**
+     * Should the reminder fire RIGHT NOW (called from main.js scheduler tick)?
+     * Returns true exactly once per scheduled day-of-week, after the configured
+     * hour, regardless of how many times the tick runs in that window.
+     * Use markPhoneReminderFired() after firing to update lastFiredOn.
+     */
+    shouldFirePhoneReminderNow(now = new Date()) {
+        const cfg = this.getPhoneReminderConfig();
+        if (!cfg.enabled) return false;
+        if (now.getDay() !== cfg.dayOfWeek) return false;
+        if (now.getHours() < cfg.hour) return false;
+        const todayIso = this._dateToIso(now);
+        if (cfg.lastFiredOn === todayIso) return false; // already fired today
+        return true;
+    }
+
+    markPhoneReminderFired(now = new Date()) {
+        const cfg = this.getPhoneReminderConfig();
+        cfg.lastFiredOn = this._dateToIso(now);
+        this.store.set('phoneExportReminder', cfg);
+    }
+
     // ---------------- HUD widget configuration ----------------
     getHudConfig() {
         const defaults = { visible: false, autoHideFullscreen: true, clickThrough: false };
