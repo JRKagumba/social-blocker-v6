@@ -20,6 +20,11 @@ Thumbs.db
 .env
 .env.local
 
+# Private phone activity exports — historical Digital Wellbeing OCR baseline
+# (will later also cover StayFree exports + adb dumpsys captures). NEVER commit.
+phone_app_activity_log*
+phone_app_activity_log_csv_tabs/
+
 # Electron build files
 out/
 build/
