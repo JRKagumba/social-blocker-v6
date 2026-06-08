@@ -33,6 +33,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   scheduleUpdate: (id, changes) => ipcRenderer.invoke('schedule-update', { id, changes }),
   scheduleDelete: (id) => ipcRenderer.invoke('schedule-delete', { id }),
   scheduleClearAll: () => ipcRenderer.invoke('schedule-clear-all'),
+
+  // --- Phone usage data (v1.7.0) ---
+  phoneGetStatus: () => ipcRenderer.invoke('phone-get-status'),
+  phonePickFolder: () => ipcRenderer.invoke('phone-pick-folder'),
+  phoneImportFolder: (folderPath) => ipcRenderer.invoke('phone-import-folder', folderPath),
+  phoneClearAll: () => ipcRenderer.invoke('phone-clear-all'),
+  getPhoneInsights: () => ipcRenderer.invoke('get-phone-insights'),
   
   // --- History and Logging ---
   getHistory: () => ipcRenderer.invoke('get-history'),

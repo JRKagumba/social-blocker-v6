@@ -586,6 +586,48 @@
                  ==================================================== -->
             <div id="content-history" class="tab-content hidden">
 
+                <!-- =================== SCOPE TOGGLE (v1.7.0) ==================== -->
+                <!-- Segmented control: Desktop | Phone | Both.
+                     - Desktop: show only #insights-desktop-pane (existing panels).
+                     - Phone:   show only #insights-phone-pane (new panels).
+                     - Both:    show both, with section headers.
+                     Phone option is disabled until phone data exists. Renderer
+                     enforces enable/disable + persists last choice. -->
+                <section class="panel p-3 mb-4 flex items-center justify-between flex-wrap gap-2">
+                    <div>
+                        <p class="label">View scope</p>
+                        <p id="insights-scope-hint" style="font-size: 11px; color: var(--ink-3); margin-top: 2px;">
+                            Pick which device&rsquo;s data to show. Phone data is read-only.
+                        </p>
+                    </div>
+                    <div role="group" aria-label="Insights scope" class="flex" style="border:1px solid var(--line); border-radius:6px; overflow:hidden;">
+                        <button id="insights-scope-desktop" class="insights-scope-btn"
+                                data-scope="desktop"
+                                style="padding:6px 14px; font-size:12px; background:var(--accent); color:white; border:none; cursor:pointer;">
+                            Desktop
+                        </button>
+                        <button id="insights-scope-phone" class="insights-scope-btn"
+                                data-scope="phone" disabled
+                                style="padding:6px 14px; font-size:12px; background:var(--panel-2); color:var(--ink-3); border:none; border-left:1px solid var(--line); cursor:not-allowed;"
+                                title="Import phone data in Settings first">
+                            Phone
+                        </button>
+                        <button id="insights-scope-both" class="insights-scope-btn"
+                                data-scope="both" disabled
+                                style="padding:6px 14px; font-size:12px; background:var(--panel-2); color:var(--ink-3); border:none; border-left:1px solid var(--line); cursor:not-allowed;"
+                                title="Import phone data in Settings first">
+                            Both
+                        </button>
+                    </div>
+                </section>
+
+                <!-- ====================================================
+                     DESKTOP PANE — existing content (unchanged behavior;
+                     just wrapped so we can hide/show as one unit).
+                     ==================================================== -->
+                <div id="insights-desktop-pane">
+                    <p id="insights-desktop-pane-label" class="label mb-2 hidden">Desktop</p>
+
                 <!-- =================== 4 KPI CARDS ==================== -->
                 <section class="grid grid-cols-2 gap-3 mb-4" style="grid-template-columns: repeat(4, 1fr);">
                     <div class="panel p-4">
@@ -653,6 +695,75 @@
                         Nothing unblocked yet today. Keep it up.
                     </p>
                 </section>
+
+                </div>
+                <!-- /#insights-desktop-pane -->
+
+                <!-- ====================================================
+                     PHONE PANE (v1.7.0). Hidden unless scope is Phone or Both.
+                     Mirrors the desktop layout: 4 KPIs + week-over-week chart.
+                     No friction timeline (no analog on phone), no per-hour KPI
+                     (Digital Wellbeing is daily-aggregate only).
+                     ==================================================== -->
+                <div id="insights-phone-pane" class="hidden">
+                    <p id="insights-phone-pane-label" class="label mb-2 hidden" style="margin-top: 24px;">Phone</p>
+
+                    <!-- Phone KPI cards -->
+                    <section class="grid grid-cols-2 gap-3 mb-4" style="grid-template-columns: repeat(4, 1fr);">
+                        <div class="panel p-4">
+                            <p class="label mb-1">Today (phone)</p>
+                            <p id="phone-kpi-today-total" class="num font-semibold"
+                               style="font-size: 22px; color: var(--ink);">&mdash;</p>
+                            <p id="phone-kpi-today-detail" style="font-size: 11px; color: var(--ink-3); margin-top: 2px;">
+                                Total screen time
+                            </p>
+                        </div>
+                        <div class="panel p-4">
+                            <p class="label mb-1">Unlocks today</p>
+                            <p id="phone-kpi-unlocks" class="num font-semibold"
+                               style="font-size: 22px; color: var(--ink);">&mdash;</p>
+                            <p id="phone-kpi-unlocks-detail" style="font-size: 11px; color: var(--ink-3); margin-top: 2px;">
+                                Phone unlocks today
+                            </p>
+                        </div>
+                        <div class="panel p-4">
+                            <p class="label mb-1">Top app today</p>
+                            <p id="phone-kpi-top-app" class="num font-semibold"
+                               style="font-size: 18px; color: var(--ink);">&mdash;</p>
+                            <p id="phone-kpi-top-app-detail" style="font-size: 11px; color: var(--ink-3); margin-top: 2px;">
+                                Most screen time
+                            </p>
+                        </div>
+                        <div class="panel p-4">
+                            <p class="label mb-1">Top opened today</p>
+                            <p id="phone-kpi-top-opened" class="num font-semibold"
+                               style="font-size: 18px; color: var(--ink);">&mdash;</p>
+                            <p id="phone-kpi-top-opened-detail" style="font-size: 11px; color: var(--ink-3); margin-top: 2px;">
+                                Most launches
+                            </p>
+                        </div>
+                    </section>
+
+                    <!-- Phone week chart -->
+                    <section class="panel p-5 mb-4">
+                        <p class="label mb-1">Weekly comparison (phone)</p>
+                        <h2 class="font-semibold mb-1" style="font-size: 15px;">This week vs last week</h2>
+                        <p id="phone-week-best" style="color: var(--ink-3); font-size: 12px;" class="mb-4">
+                            &mdash;
+                        </p>
+                        <div style="position: relative; height: 220px;">
+                            <canvas id="phone-week-chart"></canvas>
+                        </div>
+                    </section>
+
+                    <!-- Empty-state placeholder -->
+                    <section id="phone-pane-empty" class="panel p-5 mb-4 hidden text-center">
+                        <p style="color: var(--ink-3); font-size: 13px;">
+                            No phone data imported. Go to <span style="color: var(--ink);">Settings &rarr; Phone usage data</span> to pick a CSV folder.
+                        </p>
+                    </section>
+                </div>
+                <!-- /#insights-phone-pane -->
 
                 <!-- =================== ALL-TIME DATA (existing charts) ==================== -->
                 <p class="label mb-2" style="margin-top: 24px;">All-time data</p>
@@ -844,6 +955,75 @@
                     <div class="num" style="font-size: 11px; color: var(--ink-3);">
                         Ladder: 1st = 1 sentence \u00b7 2nd = 2 sentences \u00b7 3rd = 3 sentences \u00b7
                         4th = 4 sentences + 15s cooldown \u00b7 5th+ = full paragraph + 60s cooldown
+                    </div>
+                </section>
+
+                <!-- =================== PHONE DATA (v1.7.0) ==================== -->
+                <section class="panel p-5 mb-4">
+                    <p class="label mb-1">Cross-device</p>
+                    <h2 class="font-semibold mb-1" style="font-size: 15px;">Phone usage data</h2>
+                    <p style="color: var(--ink-3); font-size: 12px;" class="mb-4">
+                        Import your Digital Wellbeing / StayFree exports so phone screen time and unlocks
+                        show up in Insights alongside your desktop usage.
+                        Read-only &mdash; this app can&rsquo;t block phone apps.
+                    </p>
+
+                    <!-- Source picker. CSV folder is the only live option today;
+                         ADB-live-sync and StayFree-export entries are scaffolded
+                         disabled so the user knows what's coming. -->
+                    <div class="panel-2 p-4 mb-3">
+                        <p class="label mb-2">Data source</p>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
+                            <label class="flex items-center gap-2 cursor-pointer" style="font-size: 12px;">
+                                <input type="radio" name="phone-source" id="phone-source-csv"
+                                       value="csv" class="w-3.5 h-3.5" checked>
+                                <span style="color: var(--ink);">CSV folder import</span>
+                            </label>
+                            <label class="flex items-center gap-2 cursor-not-allowed opacity-50" style="font-size: 12px;">
+                                <input type="radio" name="phone-source" value="adb" class="w-3.5 h-3.5" disabled>
+                                <span>ADB live sync <span style="color: var(--ink-3);">(planned)</span></span>
+                            </label>
+                            <label class="flex items-center gap-2 cursor-not-allowed opacity-50" style="font-size: 12px;">
+                                <input type="radio" name="phone-source" value="stayfree" class="w-3.5 h-3.5" disabled>
+                                <span>StayFree export <span style="color: var(--ink-3);">(planned)</span></span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Status + import controls -->
+                    <div class="panel-2 p-4 mb-3">
+                        <div class="flex items-center justify-between gap-3 mb-3">
+                            <div class="flex-1 min-w-0">
+                                <p style="font-size: 13px; color: var(--ink);" class="font-semibold">Status</p>
+                                <p id="phone-status-line" style="font-size: 12px; color: var(--ink-3);" class="mt-0.5">
+                                    No phone data imported yet.
+                                </p>
+                                <p id="phone-status-folder" class="font-mono break-all hidden" style="font-size: 11px; color: var(--ink-3); margin-top: 4px;">
+                                    &mdash;
+                                </p>
+                            </div>
+                            <div class="flex gap-2">
+                                <button id="phone-pick-folder-btn" class="btn btn-primary" style="padding: 4px 10px; font-size: 12px;">
+                                    Pick folder &amp; import
+                                </button>
+                                <button id="phone-reimport-btn" class="btn hidden" style="padding: 4px 10px; font-size: 12px;">
+                                    Re-import last folder
+                                </button>
+                            </div>
+                        </div>
+                        <div id="phone-import-status" style="font-size: 12px; min-height: 1.25rem; color: var(--ink-3);">
+                            &nbsp;
+                        </div>
+                    </div>
+
+                    <!-- Danger zone -->
+                    <div class="flex items-center justify-between gap-3">
+                        <p style="font-size: 11px; color: var(--ink-3);">
+                            Phone data is stored locally only. Nothing is uploaded.
+                        </p>
+                        <button id="phone-clear-btn" class="btn hidden" style="padding: 3px 10px; font-size: 11px; color: var(--danger);">
+                            Clear all phone data
+                        </button>
                     </div>
                 </section>
 

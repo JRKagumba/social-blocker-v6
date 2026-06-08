@@ -886,8 +886,190 @@ class DataManager {
             deepWorkSpecialSites: this.getDeepWorkSpecialSites(),
             deepWorkSchedule: this.getDeepWorkSchedule(),
             progressiveFrictionConfig: this.getProgressiveFrictionConfig(),
+            phoneStatus: this.getPhoneStatus(),
             ...hostsIntegrityOverlay
         };
+    }
+
+    // ============================================================
+    // Phone usage data (v1.7.0)
+    // ------------------------------------------------------------
+    // Pluggable: the store doesn't care which source produced the
+    // records (CSV folder import today; ADB/StayFree feeders later).
+    // Schema: store.phoneUsage = {
+    //     source: 'csv-folder-import' | 'adb-pull' | 'stayfree-export',
+    //     sourceLabel: human-readable string for UI,
+    //     lastImportedAt: ISO string,
+    //     lastImportFolder: string | null,
+    //     days: { 'YYYY-MM-DD': PhoneDayRecord, ... }
+    // }
+    //
+    // A PhoneDayRecord is exactly the shape phoneCsvParser.parseFolder()
+    // returns inside payload.days[date]. Keeping these symmetric means
+    // future feeders only need to populate the same record shape — they
+    // don't need to know how the store works.
+    // ============================================================
+
+    getPhoneUsage() {
+        const defaults = {
+            source: null,
+            sourceLabel: null,
+            lastImportedAt: null,
+            lastImportFolder: null,
+            days: {},
+        };
+        const stored = this.store.get('phoneUsage', defaults) || {};
+        // Defensive normalization in case stored shape is partial.
+        return {
+            ...defaults,
+            ...stored,
+            days: stored.days && typeof stored.days === 'object' ? stored.days : {},
+        };
+    }
+
+    /**
+     * Lightweight summary for the renderer + Insights tab. Doesn't include
+     * the full per-day data — that lives in getPhoneUsage().
+     */
+    getPhoneStatus() {
+        const pu = this.getPhoneUsage();
+        const dates = Object.keys(pu.days).sort();
+        const newestDate = dates.length ? dates[dates.length - 1] : null;
+        const oldestDate = dates.length ? dates[0] : null;
+        return {
+            hasData: dates.length > 0,
+            source: pu.source,
+            sourceLabel: pu.sourceLabel,
+            lastImportedAt: pu.lastImportedAt,
+            lastImportFolder: pu.lastImportFolder,
+            daysCount: dates.length,
+            newestDate,
+            oldestDate,
+        };
+    }
+
+    /**
+     * Merge an import payload (from phoneCsvParser.parseFolder or any future
+     * feeder with the same shape) into the store. New days overwrite old
+     * days for the same date — this is intentional so re-importing after a
+     * data correction Just Works.
+     *
+     * @param {object} payload  Must include { source, sourceLabel, days, sourceFolder? }
+     * @returns {object} { daysImported, daysReplaced, totalDays, warnings }
+     */
+    importPhoneUsage(payload) {
+        if (!payload || typeof payload !== 'object' || !payload.days) {
+            throw new Error('importPhoneUsage: payload missing required "days" map');
+        }
+        const current = this.getPhoneUsage();
+        const before = new Set(Object.keys(current.days));
+        const incoming = Object.keys(payload.days);
+
+        let daysImported = 0;
+        let daysReplaced = 0;
+        for (const iso of incoming) {
+            if (before.has(iso)) daysReplaced += 1;
+            else daysImported += 1;
+            current.days[iso] = payload.days[iso];
+        }
+
+        current.source = payload.source || 'unknown';
+        current.sourceLabel = payload.sourceLabel || payload.source || 'Phone import';
+        current.lastImportedAt = payload.importedAt || new Date().toISOString();
+        if (payload.sourceFolder) current.lastImportFolder = payload.sourceFolder;
+
+        this.store.set('phoneUsage', current);
+
+        return {
+            daysImported,
+            daysReplaced,
+            totalDays: Object.keys(current.days).length,
+            warnings: Array.isArray(payload.warnings) ? payload.warnings : [],
+        };
+    }
+
+    clearPhoneUsage() {
+        this.store.set('phoneUsage', {
+            source: null,
+            sourceLabel: null,
+            lastImportedAt: null,
+            lastImportFolder: null,
+            days: {},
+        });
+        return { cleared: true };
+    }
+
+    // ----- Pure phone read helpers (mirror desktop helpers) -----
+    getPhoneDailyTotalMinutes(date) {
+        const r = this.getPhoneUsage().days[date];
+        return r && typeof r.totalMinutes === 'number' ? r.totalMinutes : 0;
+    }
+    getPhoneDailyUnlocks(date) {
+        const r = this.getPhoneUsage().days[date];
+        return r && typeof r.unlocks === 'number' ? r.unlocks : 0;
+    }
+    /**
+     * Returns the canonical app name with the highest minutes for the given
+     * date, or null if no data. Used by Insights "Top phone app today".
+     */
+    getPhoneTopAppForDay(date) {
+        const r = this.getPhoneUsage().days[date];
+        if (!r || !r.perApp) return null;
+        let best = null;
+        let bestMin = -1;
+        for (const [app, min] of Object.entries(r.perApp)) {
+            if (typeof min === 'number' && min > bestMin) { best = app; bestMin = min; }
+        }
+        return best ? { app: best, minutes: bestMin } : null;
+    }
+    /**
+     * Highest-opens-count app for the day. Separate from screen-time top
+     * app because the two often disagree (Messages opens 100+ times but
+     * each session is brief).
+     */
+    getPhoneTopOpenedAppForDay(date) {
+        const r = this.getPhoneUsage().days[date];
+        if (!r || !r.perAppOpens) return null;
+        let best = null;
+        let bestOpens = -1;
+        for (const [app, opens] of Object.entries(r.perAppOpens)) {
+            if (typeof opens === 'number' && opens > bestOpens) { best = app; bestOpens = opens; }
+        }
+        return best ? { app: best, opens: bestOpens } : null;
+    }
+    /**
+     * Mirror getWeekTotals() for phone data. Returns 7-element array of
+     * { date, dayOfWeek, totalMinutes, unlocks } objects ending today
+     * (weekOffset=0) or `weekOffset` weeks back.
+     */
+    getPhoneWeekTotals(weekOffset = 0) {
+        const todayIso = this.getLocalISODate();
+        const today = new Date(todayIso + 'T12:00:00');
+        const start = new Date(today);
+        start.setDate(start.getDate() - 6 - (weekOffset * 7));
+        const usage = this.getPhoneUsage();
+        const days = [];
+        for (let i = 0; i < 7; i++) {
+            const d = new Date(start);
+            d.setDate(start.getDate() + i);
+            const iso = this._dateToIso(d);
+            const rec = usage.days[iso];
+            days.push({
+                date: iso,
+                dayOfWeek: d.getDay(),
+                totalMinutes: rec && typeof rec.totalMinutes === 'number' ? rec.totalMinutes : 0,
+                unlocks: rec && typeof rec.unlocks === 'number' ? rec.unlocks : 0,
+                hasData: !!rec,
+            });
+        }
+        return days;
+    }
+
+    _dateToIso(d) {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const da = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${da}`;
     }
 
     // ---------------- HUD widget configuration ----------------

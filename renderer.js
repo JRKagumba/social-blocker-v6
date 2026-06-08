@@ -723,6 +723,204 @@ async function renderInsightsTab() {
     renderInsightKpis(payload);
     renderInsightWeekChart(payload);
     renderFrictionTimeline(payload);
+
+    // Phone scope toggle wiring + initial phone-pane render. This runs every
+    // time the Insights tab is shown so freshly-imported data picks up
+    // immediately. Listeners are idempotent (we guard with __wired).
+    await initInsightsScopeToggle();
+    const scope = getInsightsScope();
+    if (scope === 'phone' || scope === 'both') {
+        await renderPhoneInsightsPane();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Insights scope toggle (v1.7.0)
+// ---------------------------------------------------------------------------
+// State: 'desktop' (default) | 'phone' | 'both'. Persisted in localStorage
+// so the user's choice survives reloads. Phone / Both only become selectable
+// once phone data is imported (handled in updateInsightsScopeAvailability).
+
+const INSIGHTS_SCOPE_KEY = 'insightsScope_v1';
+
+function getInsightsScope() {
+    const stored = (() => {
+        try { return localStorage.getItem(INSIGHTS_SCOPE_KEY); }
+        catch (e) { return null; }
+    })();
+    if (stored === 'phone' || stored === 'both' || stored === 'desktop') return stored;
+    return 'desktop';
+}
+
+function setInsightsScope(scope) {
+    try { localStorage.setItem(INSIGHTS_SCOPE_KEY, scope); } catch (e) {}
+    applyInsightsScope(scope);
+}
+
+function applyInsightsScope(scope) {
+    const desktopPane = document.getElementById('insights-desktop-pane');
+    const phonePane = document.getElementById('insights-phone-pane');
+    const desktopLabel = document.getElementById('insights-desktop-pane-label');
+    const phoneLabel = document.getElementById('insights-phone-pane-label');
+    if (!desktopPane || !phonePane) return;
+
+    if (scope === 'desktop') {
+        desktopPane.classList.remove('hidden');
+        phonePane.classList.add('hidden');
+        desktopLabel?.classList.add('hidden');
+        phoneLabel?.classList.add('hidden');
+    } else if (scope === 'phone') {
+        desktopPane.classList.add('hidden');
+        phonePane.classList.remove('hidden');
+        desktopLabel?.classList.add('hidden');
+        phoneLabel?.classList.add('hidden');
+    } else { // both
+        desktopPane.classList.remove('hidden');
+        phonePane.classList.remove('hidden');
+        desktopLabel?.classList.remove('hidden');
+        phoneLabel?.classList.remove('hidden');
+    }
+
+    // Visual highlight of selected button.
+    document.querySelectorAll('.insights-scope-btn').forEach(btn => {
+        const isActive = btn.dataset.scope === scope;
+        btn.style.background = isActive ? 'var(--accent)' : 'var(--panel-2)';
+        btn.style.color = isActive ? 'white' : (btn.disabled ? 'var(--ink-3)' : 'var(--ink)');
+    });
+}
+
+async function initInsightsScopeToggle() {
+    const buttons = document.querySelectorAll('.insights-scope-btn');
+    if (!buttons.length) return;
+
+    if (!initInsightsScopeToggle.__wired) {
+        buttons.forEach(btn => {
+            btn.addEventListener('click', async () => {
+                if (btn.disabled) return;
+                const scope = btn.dataset.scope;
+                setInsightsScope(scope);
+                if (scope === 'phone' || scope === 'both') {
+                    await renderPhoneInsightsPane();
+                }
+            });
+        });
+        initInsightsScopeToggle.__wired = true;
+    }
+
+    // Always sync availability + visible state. Source of truth = phone status.
+    try {
+        const status = await window.electronAPI.phoneGetStatus();
+        updateInsightsScopeAvailability(status);
+        let scope = getInsightsScope();
+        if ((scope === 'phone' || scope === 'both') && !status.hasData) {
+            scope = 'desktop';
+            setInsightsScope(scope);
+        } else {
+            applyInsightsScope(scope);
+        }
+    } catch (e) {
+        console.error('initInsightsScopeToggle failed:', e);
+        applyInsightsScope('desktop');
+    }
+}
+
+/**
+ * Render KPI cards + week chart for the phone pane. Reads from get-phone-insights
+ * IPC. Shows the empty-state panel if no data.
+ */
+async function renderPhoneInsightsPane() {
+    let payload;
+    try {
+        payload = await window.electronAPI.getPhoneInsights();
+    } catch (e) {
+        console.error('renderPhoneInsightsPane fetch failed:', e);
+        return;
+    }
+    if (!payload) return;
+
+    const emptyEl = document.getElementById('phone-pane-empty');
+    if (!payload.hasData) {
+        emptyEl?.classList.remove('hidden');
+        return;
+    }
+    emptyEl?.classList.add('hidden');
+
+    // KPI cards
+    const setText = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+    const fmtHours = (min) => {
+        if (!min) return '0h';
+        const h = Math.floor(min / 60);
+        const m = min % 60;
+        return h > 0 ? `${h}h ${m}m` : `${m}m`;
+    };
+    setText('phone-kpi-today-total', payload.today.totalMinutes > 0 ? fmtHours(payload.today.totalMinutes) : '—');
+    setText('phone-kpi-unlocks', payload.today.unlocks > 0 ? String(payload.today.unlocks) : '—');
+    if (payload.today.topApp) {
+        setText('phone-kpi-top-app', payload.today.topApp.app);
+        setText('phone-kpi-top-app-detail', `${payload.today.topApp.minutes} min today`);
+    } else {
+        setText('phone-kpi-top-app', '—');
+        setText('phone-kpi-top-app-detail', 'No data for today');
+    }
+    if (payload.today.topOpenedApp) {
+        setText('phone-kpi-top-opened', payload.today.topOpenedApp.app);
+        setText('phone-kpi-top-opened-detail', `${payload.today.topOpenedApp.opens} opens today`);
+    } else {
+        setText('phone-kpi-top-opened', '—');
+        setText('phone-kpi-top-opened-detail', 'No data for today');
+    }
+
+    // Week chart
+    renderPhoneWeekChart(payload);
+}
+
+function renderPhoneWeekChart(payload) {
+    const canvas = document.getElementById('phone-week-chart');
+    if (!canvas || typeof Chart === 'undefined') return;
+    const days = payload.week?.days || [];
+    const labels = days.map(d => ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.dayOfWeek]);
+    const data = days.map(d => Math.round(d.totalMinutes));
+
+    if (window.phoneWeekChartInstance) window.phoneWeekChartInstance.destroy();
+    window.phoneWeekChartInstance = new Chart(canvas.getContext('2d'), {
+        type: 'bar',
+        data: {
+            labels,
+            datasets: [{
+                label: 'Phone screen time (minutes)',
+                data,
+                backgroundColor: 'rgba(107, 138, 245, 0.55)',
+                borderColor: 'rgba(107, 138, 245, 1)',
+                borderWidth: 1,
+                borderRadius: 3,
+            }],
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: { color: '#9ca0a8', font: { size: 11 }, callback: v => v + ' min' },
+                    grid: { color: '#1c1d1f' },
+                },
+                x: { ticks: { color: '#9ca0a8', font: { size: 11 } }, grid: { color: 'transparent' } },
+            },
+            plugins: { legend: { display: false } },
+        },
+    });
+
+    const bestLine = document.getElementById('phone-week-best');
+    if (bestLine) {
+        const thisW = payload.week.thisWeekTotal || 0;
+        const lastW = payload.week.lastWeekTotal || 0;
+        const delta = thisW - lastW;
+        const arrow = delta === 0 ? '' : (delta > 0 ? '↑' : '↓');
+        const deltaText = lastW > 0
+            ? `${arrow} ${Math.abs(Math.round((delta / lastW) * 100))}% vs last week`
+            : 'No comparison (no last-week data)';
+        bestLine.innerHTML = `This week: <span class="num">${Math.round(thisW)}</span> min &middot; last week: <span class="num">${Math.round(lastW)}</span> min &middot; ${deltaText}`;
+    }
 }
 
 async function renderUsageChart() {
@@ -2150,6 +2348,128 @@ async function initSettingsPanel() {
     await initSettingsStartupSection();
     await initSettingsHudSection();
     await initSettingsFrictionSection();
+    await initSettingsPhonePanel();
+}
+
+// ---------------------------------------------------------------------------
+// Phone Data settings panel (v1.7.0)
+// ---------------------------------------------------------------------------
+// Wires the Settings -> Phone usage data section: source picker (CSV only
+// today), folder-pick + import button, status line, re-import button, and
+// destructive "Clear all" with confirmation. Status refreshes the Insights
+// scope toggle so newly-imported data immediately enables Phone / Both.
+
+async function initSettingsPhonePanel() {
+    const pickBtn = document.getElementById('phone-pick-folder-btn');
+    const reimportBtn = document.getElementById('phone-reimport-btn');
+    const clearBtn = document.getElementById('phone-clear-btn');
+    const statusLine = document.getElementById('phone-status-line');
+    const statusFolder = document.getElementById('phone-status-folder');
+    const importStatus = document.getElementById('phone-import-status');
+    if (!pickBtn) return;
+
+    const refresh = async () => {
+        try {
+            const s = await window.electronAPI.phoneGetStatus();
+            renderPhoneStatus(s);
+            updateInsightsScopeAvailability(s);
+        } catch (e) {
+            console.error('phone status refresh failed:', e);
+        }
+    };
+
+    function renderPhoneStatus(s) {
+        if (!s.hasData) {
+            statusLine.textContent = 'No phone data imported yet.';
+            statusFolder.classList.add('hidden');
+            reimportBtn.classList.add('hidden');
+            clearBtn.classList.add('hidden');
+            return;
+        }
+        const importedAt = s.lastImportedAt ? new Date(s.lastImportedAt).toLocaleString() : 'unknown';
+        statusLine.innerHTML = `<span style="color: var(--ink);">${s.daysCount} day${s.daysCount === 1 ? '' : 's'}</span> of phone data &middot; ` +
+            `<span class="num">${s.oldestDate} &rarr; ${s.newestDate}</span> &middot; ` +
+            `source: <span style="color: var(--ink);">${s.sourceLabel || s.source}</span> &middot; ` +
+            `imported ${importedAt}`;
+        if (s.lastImportFolder) {
+            statusFolder.textContent = s.lastImportFolder;
+            statusFolder.classList.remove('hidden');
+        } else {
+            statusFolder.classList.add('hidden');
+        }
+        reimportBtn.classList.remove('hidden');
+        clearBtn.classList.remove('hidden');
+    }
+
+    async function doImport(folderPath) {
+        if (!folderPath) return;
+        importStatus.textContent = 'Importing...';
+        importStatus.style.color = 'var(--ink-3)';
+        try {
+            const r = await window.electronAPI.phoneImportFolder(folderPath);
+            if (!r.success) {
+                importStatus.textContent = `Import failed: ${r.error || 'unknown error'}`;
+                importStatus.style.color = 'var(--danger)';
+                return;
+            }
+            const warn = (r.warnings || []).length ? ` (${r.warnings.length} warning${r.warnings.length === 1 ? '' : 's'})` : '';
+            importStatus.textContent = `Imported. ${r.daysImported} new day${r.daysImported === 1 ? '' : 's'}, ${r.daysReplaced} replaced. Total: ${r.totalDays}.${warn}`;
+            importStatus.style.color = 'var(--success)';
+            await refresh();
+        } catch (e) {
+            importStatus.textContent = `Import error: ${e?.message || e}`;
+            importStatus.style.color = 'var(--danger)';
+        }
+    }
+
+    pickBtn.addEventListener('click', async () => {
+        const pick = await window.electronAPI.phonePickFolder();
+        if (pick.canceled) return;
+        await doImport(pick.folderPath);
+    });
+
+    reimportBtn.addEventListener('click', async () => {
+        const s = await window.electronAPI.phoneGetStatus();
+        if (!s.lastImportFolder) {
+            importStatus.textContent = 'No last-used folder remembered. Use "Pick folder & import" instead.';
+            importStatus.style.color = 'var(--warn)';
+            return;
+        }
+        await doImport(s.lastImportFolder);
+    });
+
+    clearBtn.addEventListener('click', async () => {
+        if (!confirm('Wipe ALL imported phone data? This cannot be undone.')) return;
+        if (!confirm('Final confirmation: remove every imported phone day?')) return;
+        try {
+            await window.electronAPI.phoneClearAll();
+            importStatus.textContent = 'Phone data cleared.';
+            importStatus.style.color = 'var(--ink-3)';
+            await refresh();
+        } catch (e) {
+            importStatus.textContent = `Clear failed: ${e?.message || e}`;
+            importStatus.style.color = 'var(--danger)';
+        }
+    });
+
+    await refresh();
+}
+
+/**
+ * Enable/disable the Insights scope toggle buttons based on whether phone
+ * data exists. Called from initSettingsPhonePanel() after any import/clear.
+ */
+function updateInsightsScopeAvailability(phoneStatus) {
+    const phoneBtn = document.getElementById('insights-scope-phone');
+    const bothBtn = document.getElementById('insights-scope-both');
+    if (!phoneBtn || !bothBtn) return;
+    const enabled = !!phoneStatus?.hasData;
+    [phoneBtn, bothBtn].forEach(btn => {
+        btn.disabled = !enabled;
+        btn.style.cursor = enabled ? 'pointer' : 'not-allowed';
+        btn.style.color = enabled ? '' : 'var(--ink-3)';
+        btn.title = enabled ? '' : 'Import phone data in Settings first';
+    });
 }
 
 // ---------------------------------------------------------------------------

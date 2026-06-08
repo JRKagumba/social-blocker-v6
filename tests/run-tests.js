@@ -776,6 +776,134 @@ group('DataManager insights helpers', () => {
 });
 
 // ---------------------------------------------------------------------------
+// 7b) Phone CSV parser + normalizer + dataManager phone helpers (v1.7.0)
+// ---------------------------------------------------------------------------
+group('phoneAppNormalizer.isChromeSubSite', () => {
+    const { isChromeSubSite } = require('../phoneAppNormalizer');
+    ok('google.com is sub-site', isChromeSubSite('google.com') === true);
+    ok('nytimes.com is sub-site', isChromeSubSite('nytimes.com') === true);
+    ok('subdomain.example.org is sub-site', isChromeSubSite('subdomain.example.org') === true);
+    ok('YouTube is NOT sub-site', isChromeSubSite('YouTube') === false);
+    ok('Prime Video is NOT sub-site (has space)', isChromeSubSite('Prime Video') === false);
+    ok('empty string is NOT sub-site', isChromeSubSite('') === false);
+    ok('non-string is NOT sub-site', isChromeSubSite(null) === false);
+    ok('very long hostname rejected', isChromeSubSite('a'.repeat(70) + '.com') === false);
+});
+
+group('phoneAppNormalizer.normalizeAppName', () => {
+    const { normalizeAppName } = require('../phoneAppNormalizer');
+    ok('identity for YouTube', normalizeAppName('YouTube') === 'YouTube');
+    ok('identity for Instagram', normalizeAppName('Instagram') === 'Instagram');
+    ok('trims whitespace', normalizeAppName('  Reddit  ') === 'Reddit');
+    ok('google.com folds to Chrome', normalizeAppName('google.com') === 'Chrome');
+    ok('nytimes.com folds to Chrome', normalizeAppName('nytimes.com') === 'Chrome');
+    ok('diamondleague.com folds to Chrome', normalizeAppName('diamondleague.com') === 'Chrome');
+    ok('empty returns null', normalizeAppName('') === null);
+    ok('non-string returns null', normalizeAppName(42) === null);
+});
+
+group('phoneCsvParser.parseCsvLine', () => {
+    const { parseCsvLine } = require('../phoneCsvParser');
+    ok('simple split', JSON.stringify(parseCsvLine('a,b,c')) === '["a","b","c"]');
+    ok('quoted comma preserved', JSON.stringify(parseCsvLine('a,"b,c",d')) === '["a","b,c","d"]');
+    ok('escaped quote inside quoted field',
+        JSON.stringify(parseCsvLine('"he said ""hi""",end')) === '["he said \\"hi\\"","end"]');
+    ok('empty trailing field', JSON.stringify(parseCsvLine('a,b,')) === '["a","b",""]');
+});
+
+group('phoneCsvParser.normalizeIsoDate', () => {
+    const { normalizeIsoDate } = require('../phoneCsvParser');
+    ok('valid ISO accepted', normalizeIsoDate('2026-05-10') === '2026-05-10');
+    ok('garbage returns null', normalizeIsoDate('not-a-date') === null);
+    ok('month 13 rejected', normalizeIsoDate('2026-13-01') === null);
+    ok('day 32 rejected', normalizeIsoDate('2026-01-32') === null);
+    ok('year 1999 rejected', normalizeIsoDate('1999-01-01') === null);
+    ok('non-string returns null', normalizeIsoDate(null) === null);
+});
+
+group('phoneCsvParser.parseFolder (synthetic fixtures)', () => {
+    const path = require('path');
+    const { parseFolder } = require('../phoneCsvParser');
+    const fixtures = path.join(__dirname, 'phone-fixtures');
+    const payload = parseFolder(fixtures);
+
+    ok('payload has source label', payload.source === 'csv-folder-import');
+    ok('payload has importedAt ISO',
+        typeof payload.importedAt === 'string' && payload.importedAt.includes('T'));
+    ok('payload contains 3 days', Object.keys(payload.days).length === 3, Object.keys(payload.days));
+    ok('Jan 5 totalMinutes from daily-screen-time',
+        payload.days['2026-01-05'].totalMinutes === 180, payload.days['2026-01-05']);
+    ok('Jan 5 unlocks from daily-unlocks',
+        payload.days['2026-01-05'].unlocks === 42, payload.days['2026-01-05']);
+    ok('Jan 5 dayOfWeek (Mon) === 1',
+        payload.days['2026-01-05'].dayOfWeek === 1, payload.days['2026-01-05']);
+
+    // Chrome sub-site fold: Jan 5 fixture has Chrome:30, google.com:5, example.org:2.
+    // After fold, perApp.Chrome === 37.
+    ok('Chrome sub-sites folded into Chrome bucket',
+        payload.days['2026-01-05'].perApp.Chrome === 37, payload.days['2026-01-05'].perApp);
+    ok('YouTube minutes preserved',
+        payload.days['2026-01-05'].perApp.YouTube === 90, payload.days['2026-01-05'].perApp);
+    ok('Sub-site rows NOT counted in visibleRowCount (5 input rows -> 3 visible apps)',
+        payload.days['2026-01-05'].visibleRowCount === 3, payload.days['2026-01-05']);
+
+    ok('perAppOpens populated from app-opens tab',
+        payload.days['2026-01-05'].perAppOpens?.WhatsApp === 75, payload.days['2026-01-05']);
+    ok('no warnings on clean fixtures', payload.warnings.length === 0, payload.warnings);
+});
+
+group('DataManager phone usage CRUD + helpers', () => {
+    const DataManager = require('../dataManager');
+    const path = require('path');
+    const { parseFolder } = require('../phoneCsvParser');
+    const dm = new DataManager();
+    dm.clearPhoneUsage();
+
+    const status0 = dm.getPhoneStatus();
+    ok('initial status hasData=false', status0.hasData === false, status0);
+    ok('initial daysCount=0', status0.daysCount === 0, status0);
+
+    const payload = parseFolder(path.join(__dirname, 'phone-fixtures'));
+    payload.sourceFolder = '/test/fixture-path';
+    const r1 = dm.importPhoneUsage(payload);
+    ok('first import adds 3 new days', r1.daysImported === 3 && r1.daysReplaced === 0, r1);
+
+    // Re-import should replace, not duplicate.
+    const r2 = dm.importPhoneUsage(payload);
+    ok('re-import replaces 3 days', r2.daysReplaced === 3 && r2.daysImported === 0, r2);
+
+    const status1 = dm.getPhoneStatus();
+    ok('status hasData=true after import', status1.hasData === true);
+    ok('status daysCount=3', status1.daysCount === 3, status1);
+    ok('status newestDate=2026-01-07', status1.newestDate === '2026-01-07', status1);
+    ok('status oldestDate=2026-01-05', status1.oldestDate === '2026-01-05', status1);
+    ok('status lastImportFolder remembered', status1.lastImportFolder === '/test/fixture-path');
+
+    ok('getPhoneDailyTotalMinutes Jan 5 === 180',
+        dm.getPhoneDailyTotalMinutes('2026-01-05') === 180);
+    ok('getPhoneDailyTotalMinutes missing day === 0',
+        dm.getPhoneDailyTotalMinutes('2099-12-31') === 0);
+    ok('getPhoneDailyUnlocks Jan 6 === 55', dm.getPhoneDailyUnlocks('2026-01-06') === 55);
+
+    const top = dm.getPhoneTopAppForDay('2026-01-05');
+    // YouTube 90 > Chrome 37 (folded) > Instagram 45 — wait, 45 > 37. Let me sort: YouTube 90, Instagram 45, Chrome 37.
+    ok('top app for Jan 5 is YouTube (90 min)',
+        top?.app === 'YouTube' && top?.minutes === 90, top);
+
+    const topOpens = dm.getPhoneTopOpenedAppForDay('2026-01-06');
+    ok('top opens for Jan 6 is Messages (120)',
+        topOpens?.app === 'Messages' && topOpens?.opens === 120, topOpens);
+
+    const week = dm.getPhoneWeekTotals(0);
+    ok('week totals returns 7 entries', week.length === 7, week.length);
+    ok('week totals dates strictly increase',
+        week.every((d, i) => i === 0 || d.date > week[i - 1].date));
+
+    dm.clearPhoneUsage();
+    ok('clear wipes status', dm.getPhoneStatus().hasData === false);
+});
+
+// ---------------------------------------------------------------------------
 // 8) Summary
 // ---------------------------------------------------------------------------
 console.log('\n=========================================');

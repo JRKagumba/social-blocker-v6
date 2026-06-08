@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Tray, Menu, Notification, nativeImage, shell, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, Tray, Menu, Notification, nativeImage, shell, screen, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -1219,6 +1219,105 @@ ipcMain.handle('schedule-delete', async (_event, payload) => {
 
 ipcMain.handle('schedule-clear-all', async () => {
     return dataManager.clearDeepWorkSchedule();
+});
+
+// ============================================================
+// Phone usage data (v1.7.0)
+// ------------------------------------------------------------
+// IPC surface for the renderer's Settings -> Phone Data section.
+// CSV folder import is the only feeder today; ADB / StayFree will
+// land as additional handlers (phone-import-adb, phone-import-stayfree)
+// without changing the storage layer or the renderer's status surface.
+// ============================================================
+const phoneCsvParser = require('./phoneCsvParser');
+
+ipcMain.handle('phone-get-status', async () => {
+    return dataManager.getPhoneStatus();
+});
+
+/**
+ * Open native folder picker. Returns { canceled, folderPath } so the
+ * renderer can immediately follow up with phone-import-folder.
+ */
+ipcMain.handle('phone-pick-folder', async () => {
+    const lastFolder = dataManager.getPhoneStatus().lastImportFolder || undefined;
+    const result = await dialog.showOpenDialog(mainWindow, {
+        title: 'Select phone-CSV folder',
+        defaultPath: lastFolder,
+        properties: ['openDirectory'],
+        buttonLabel: 'Use this folder',
+    });
+    if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+        return { canceled: true, folderPath: null };
+    }
+    return { canceled: false, folderPath: result.filePaths[0] };
+});
+
+/**
+ * Parse + merge a phone-data folder into the store. Returns the import
+ * summary the renderer can toast. Errors surface with `success:false`.
+ */
+ipcMain.handle('phone-import-folder', async (_event, folderPath) => {
+    if (!folderPath || typeof folderPath !== 'string') {
+        return { success: false, error: 'no_folder' };
+    }
+    try {
+        const payload = phoneCsvParser.parseFolder(folderPath);
+        payload.sourceFolder = folderPath;
+        const summary = dataManager.importPhoneUsage(payload);
+        return {
+            success: true,
+            ...summary,
+            status: dataManager.getPhoneStatus(),
+        };
+    } catch (e) {
+        return { success: false, error: e?.message || String(e) };
+    }
+});
+
+ipcMain.handle('phone-clear-all', async () => {
+    dataManager.clearPhoneUsage();
+    return { success: true, status: dataManager.getPhoneStatus() };
+});
+
+/**
+ * Returns the phone-scoped equivalent of get-insights. Renderer's scope
+ * toggle [Desktop|Phone|Both] switches between get-insights (existing) and
+ * get-phone-insights (this).
+ */
+ipcMain.handle('get-phone-insights', async () => {
+    const status = dataManager.getPhoneStatus();
+    if (!status.hasData) {
+        return { hasData: false, status };
+    }
+    const todayIso = dataManager.getLocalISODate();
+    const week = dataManager.getPhoneWeekTotals(0);
+    const lastWeek = dataManager.getPhoneWeekTotals(1);
+    const thisWeekTotal = week.reduce((a, d) => a + d.totalMinutes, 0);
+    const lastWeekTotal = lastWeek.reduce((a, d) => a + d.totalMinutes, 0);
+
+    // Best day = LEAST screen-time in this week that has data (mirrors
+    // desktop interpretation of "best day").
+    const daysWithData = week.filter(d => d.hasData);
+    let bestDay = null;
+    if (daysWithData.length) {
+        bestDay = daysWithData.reduce((best, d) =>
+            (best === null || d.totalMinutes < best.totalMinutes) ? d : best,
+        null);
+    }
+
+    return {
+        hasData: true,
+        status,
+        today: {
+            date: todayIso,
+            totalMinutes: dataManager.getPhoneDailyTotalMinutes(todayIso),
+            unlocks: dataManager.getPhoneDailyUnlocks(todayIso),
+            topApp: dataManager.getPhoneTopAppForDay(todayIso),
+            topOpenedApp: dataManager.getPhoneTopOpenedAppForDay(todayIso),
+        },
+        week: { days: week, thisWeekTotal, lastWeekTotal, bestDay },
+    };
 });
 
 ipcMain.handle('end-deep-work', async () => {
