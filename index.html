@@ -756,11 +756,21 @@
                         </div>
                     </section>
 
-                    <!-- Empty-state placeholder -->
+                    <!-- Empty-state placeholder. Shown whenever the user selects
+                         the Phone or Both scope but no phone data exists yet.
+                         The button routes to Settings -> Phone Data section
+                         and flashes the import button to draw the eye. -->
                     <section id="phone-pane-empty" class="panel p-5 mb-4 hidden text-center">
-                        <p style="color: var(--ink-3); font-size: 13px;">
-                            No phone data imported. Go to <span style="color: var(--ink);">Settings &rarr; Phone usage data</span> to pick a CSV folder.
+                        <p style="color: var(--ink); font-size: 14px; font-weight: 600; margin-bottom: 6px;">
+                            No phone data imported yet
                         </p>
+                        <p style="color: var(--ink-3); font-size: 12px; margin-bottom: 14px;">
+                            Pick a folder containing your StayFree export or Digital Wellbeing CSVs.
+                        </p>
+                        <button id="phone-pane-empty-cta" class="btn"
+                                style="padding: 6px 14px; font-size: 12px; background: var(--accent); color: white; border: none;">
+                            Set up phone data &rarr;
+                        </button>
                     </section>
                 </div>
                 <!-- /#insights-phone-pane -->

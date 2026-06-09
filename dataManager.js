@@ -532,9 +532,18 @@ class DataManager {
      * the more onerous the next commitment becomes.
      */
     getTodayUnblockTotal() {
+        // Timestamps are stored as UTC ISO strings (new Date().toISOString()),
+        // but "today" must be evaluated in the user's LOCAL timezone — otherwise
+        // events created between local-midnight and UTC-midnight (e.g. 8pm EDT
+        // for a UTC-4 user) get tagged with tomorrow's UTC prefix and silently
+        // drop out of the count. Convert each timestamp back to a local date
+        // for the comparison.
         const today = this.getLocalISODate();
         return this.getUnblockHistory().filter(e => {
-            return typeof e?.timestamp === 'string' && e.timestamp.startsWith(today);
+            if (typeof e?.timestamp !== 'string') return false;
+            const d = new Date(e.timestamp);
+            if (isNaN(d.getTime())) return false;
+            return this.getLocalISODate(d) === today;
         }).length;
     }
 
@@ -690,9 +699,17 @@ class DataManager {
      * Honors the progressive-friction config (when disabled, tier=0 for all).
      */
     getTodayFrictionTimeline() {
+        // See getTodayUnblockTotal: timestamps are UTC ISO strings, but "today"
+        // must be evaluated in local time so evening-EDT events aren't
+        // misattributed to tomorrow.
         const today = this.getLocalISODate();
         const history = this.getUnblockHistory()
-            .filter(e => typeof e?.timestamp === 'string' && e.timestamp.startsWith(today))
+            .filter(e => {
+                if (typeof e?.timestamp !== 'string') return false;
+                const d = new Date(e.timestamp);
+                if (isNaN(d.getTime())) return false;
+                return this.getLocalISODate(d) === today;
+            })
             .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
         const cfg = this.getProgressiveFrictionConfig();
         const DataManager = this.constructor;

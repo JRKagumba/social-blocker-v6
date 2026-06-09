@@ -163,17 +163,10 @@ window.addEventListener('DOMContentLoaded', async () => {
     syncDeepWorkEditorActiveState(!!(initialData?.deepWork?.isActive), initialData?.deepWork?.remainingMs || 0);
 
     // v1.8.0: when the user clicks the weekly phone-export reminder notification,
-    // main.js sends 'focus-phone-settings'. We switch to Settings tab and scroll
-    // the Phone Data section into view.
+    // main.js sends 'focus-phone-settings'. Shared helper handles the scroll +
+    // attention flash so behaviour stays consistent across all entry points.
     if (window.electronAPI.onFocusPhoneSettings) {
-        window.electronAPI.onFocusPhoneSettings(() => {
-            showTab('settings');
-            // Defer the scroll until after the tab content is laid out.
-            requestAnimationFrame(() => {
-                const target = document.getElementById('phone-pick-folder-btn');
-                if (target) target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            });
-        });
+        window.electronAPI.onFocusPhoneSettings(() => jumpToPhoneSettings());
     }
 
     showTab('dashboard');
@@ -815,7 +808,17 @@ async function initInsightsScopeToggle() {
                 const scope = btn.dataset.scope;
                 setInsightsScope(scope);
                 if (scope === 'phone' || scope === 'both') {
+                    // Render first so the empty-state pane is in the DOM
+                    // before we (optionally) leave the tab. If the user
+                    // navigates back from Settings without importing,
+                    // they'll see the empty-state CTA waiting.
                     await renderPhoneInsightsPane();
+                }
+                // When the user clicks Phone/Both without having imported
+                // phone data yet, don't silently no-op — route them to the
+                // Settings -> Phone Data section so the next step is obvious.
+                if ((scope === 'phone' || scope === 'both') && btn.dataset.noPhoneData === '1') {
+                    jumpToPhoneSettings();
                 }
             });
         });
@@ -823,16 +826,13 @@ async function initInsightsScopeToggle() {
     }
 
     // Always sync availability + visible state. Source of truth = phone status.
+    // Note: we no longer auto-revert phone/both -> desktop when there's no data.
+    // The empty-state pane CTA handles the no-data case explicitly and is more
+    // informative than a silent fallback to desktop view.
     try {
         const status = await window.electronAPI.phoneGetStatus();
         updateInsightsScopeAvailability(status);
-        let scope = getInsightsScope();
-        if ((scope === 'phone' || scope === 'both') && !status.hasData) {
-            scope = 'desktop';
-            setInsightsScope(scope);
-        } else {
-            applyInsightsScope(scope);
-        }
+        applyInsightsScope(getInsightsScope());
     } catch (e) {
         console.error('initInsightsScopeToggle failed:', e);
         applyInsightsScope('desktop');
@@ -856,6 +856,12 @@ async function renderPhoneInsightsPane() {
     const emptyEl = document.getElementById('phone-pane-empty');
     if (!payload.hasData) {
         emptyEl?.classList.remove('hidden');
+        // Idempotent wiring for the empty-state CTA.
+        const cta = document.getElementById('phone-pane-empty-cta');
+        if (cta && !cta.__wired) {
+            cta.addEventListener('click', () => jumpToPhoneSettings());
+            cta.__wired = true;
+        }
         return;
     }
     emptyEl?.classList.add('hidden');
@@ -2560,16 +2566,45 @@ async function initPhoneReminderControls() {
  * Enable/disable the Insights scope toggle buttons based on whether phone
  * data exists. Called from initSettingsPhonePanel() after any import/clear.
  */
+/**
+ * Switch to the Settings tab, scroll the Phone Data section into view, and
+ * briefly flash the "Pick folder" button so the user's eye is drawn to the
+ * next action. Called from:
+ *   - clicking a Phone/Both insights toggle with no phone data yet
+ *   - clicking the weekly export reminder notification (main.js -> focus-phone-settings)
+ */
+function jumpToPhoneSettings() {
+    showTab('settings');
+    requestAnimationFrame(() => {
+        const target = document.getElementById('phone-pick-folder-btn');
+        if (!target) return;
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // Pulse the import button so the eye lands on it after the scroll.
+        const original = target.style.boxShadow;
+        target.style.transition = 'box-shadow 0.4s ease';
+        target.style.boxShadow = '0 0 0 3px var(--accent)';
+        setTimeout(() => {
+            target.style.boxShadow = original || '';
+            setTimeout(() => { target.style.transition = ''; }, 500);
+        }, 1400);
+    });
+}
+
 function updateInsightsScopeAvailability(phoneStatus) {
     const phoneBtn = document.getElementById('insights-scope-phone');
     const bothBtn = document.getElementById('insights-scope-both');
     if (!phoneBtn || !bothBtn) return;
-    const enabled = !!phoneStatus?.hasData;
+    const hasData = !!phoneStatus?.hasData;
+    // We keep the buttons CLICKABLE even when no phone data exists — clicking
+    // routes the user to Settings -> Phone Data (handled in the click listener
+    // via the data-no-data attribute below). This is friendlier than a dead
+    // "disabled" state that users (rightly) interpret as a bug.
     [phoneBtn, bothBtn].forEach(btn => {
-        btn.disabled = !enabled;
-        btn.style.cursor = enabled ? 'pointer' : 'not-allowed';
-        btn.style.color = enabled ? '' : 'var(--ink-3)';
-        btn.title = enabled ? '' : 'Import phone data in Settings first';
+        btn.disabled = false;
+        btn.dataset.noPhoneData = hasData ? '' : '1';
+        btn.style.cursor = 'pointer';
+        btn.style.opacity = hasData ? '' : '0.55';
+        btn.title = hasData ? '' : 'Click to set up phone data import';
     });
 }
 
