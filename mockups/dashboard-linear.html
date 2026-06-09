@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<!--
+UI REVAMP MOCKUP — Linear aesthetic.
+Dense, sharp, 13-14px sans-serif. Subtle gradients. Keyboard-feel.
+Numbers and labels co-equal. Built around the idea of a "queue" / "status panel".
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Dashboard mockup — Linear variant</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        :root {
+            --bg: #08090a;
+            --panel: #0f1011;
+            --panel-2: #131415;
+            --line: #1c1d1f;
+            --ink: #e6e6e6;
+            --ink-2: #9ca0a8;
+            --ink-3: #5b6066;
+            --accent: #5e6ad2;
+            --good: #4cb782;
+            --warn: #ffb224;
+            --bad:  #eb5757;
+            --grad: linear-gradient(180deg, #5e6ad2 0%, #8b95f8 100%);
+        }
+        body { background: var(--bg); color: var(--ink); font-family: "Inter", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 13px; -webkit-font-smoothing: antialiased; }
+        .num { font-feature-settings: "tnum"; font-variant-numeric: tabular-nums; }
+        .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+        .panel-2 { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; }
+        .row { border-bottom: 1px solid var(--line); }
+        .row:last-child { border-bottom: none; }
+        kbd { background: var(--panel-2); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 2px 6px; font-size: 11px; font-family: ui-monospace, monospace; color: var(--ink-2); }
+        .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-3); font-weight: 600; }
+        .chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border-radius: 4px; font-size: 11px; font-weight: 500; }
+        /* compact switch */
+        .ls-switch { width: 28px; height: 16px; background: var(--line); border-radius: 9999px; position: relative; transition: background 0.15s; cursor: pointer; flex-shrink: 0; }
+        .ls-switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; background: var(--ink-2); border-radius: 9999px; transition: transform 0.15s, background 0.15s; }
+        .ls-switch.on { background: var(--accent); }
+        .ls-switch.on::after { transform: translateX(12px); background: white; }
+        .grad-text { background: var(--grad); background-clip: text; -webkit-background-clip: text; color: transparent; }
+    </style>
+</head>
+<body>
+
+    <div class="max-w-5xl mx-auto px-8 py-6">
+
+        <!-- Top bar -->
+        <header class="flex items-center justify-between mb-6">
+            <div class="flex items-center gap-3">
+                <div class="w-6 h-6 rounded" style="background: var(--grad);"></div>
+                <span class="font-semibold">FocusGuard</span>
+                <span class="text-ink-3" style="color: var(--ink-3)">/</span>
+                <span style="color: var(--ink-2)">Today</span>
+            </div>
+            <div class="flex items-center gap-2">
+                <span class="label">CMD</span>
+                <kbd>K</kbd>
+                <span style="color: var(--ink-3)">to jump anywhere</span>
+            </div>
+        </header>
+
+        <!-- 3-up status row -->
+        <section class="grid grid-cols-3 gap-3 mb-6">
+            <div class="panel p-4">
+                <p class="label mb-2">Screen time today</p>
+                <p class="num text-2xl font-semibold">1h 47m</p>
+                <p class="text-xs mt-1" style="color: var(--good)">&minus;38m vs avg</p>
+            </div>
+            <div class="panel p-4">
+                <p class="label mb-2">Budget adherence</p>
+                <p class="num text-2xl font-semibold">73%</p>
+                <div class="mt-2 h-1 rounded-full overflow-hidden" style="background: var(--line)">
+                    <div class="h-full" style="width: 73%; background: var(--warn)"></div>
+                </div>
+            </div>
+            <div class="panel p-4">
+                <p class="label mb-2">Friction events</p>
+                <div class="flex items-baseline gap-4">
+                    <span class="num text-2xl font-semibold" style="color: var(--bad)">3</span>
+                    <span class="text-xs" style="color: var(--ink-3)">unblocks &middot; 2 tampers</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Master + Deep Work strip -->
+        <section class="panel mb-6 flex items-center justify-between px-4 py-3">
+            <div class="flex items-center gap-4">
+                <div class="ls-switch on"></div>
+                <div>
+                    <span class="font-semibold">Master Blocker</span>
+                    <span class="ml-2" style="color: var(--ink-3)">enabled</span>
+                </div>
+            </div>
+            <div class="flex items-center gap-3">
+                <span class="chip" style="background: rgba(94,106,210,0.15); color: #a3aaff;">&bull; Deep Work &middot; 1h 14m left</span>
+                <kbd>D</kbd>
+                <span style="color: var(--ink-3)">end</span>
+            </div>
+        </section>
+
+        <!-- Site list (Linear-style row table) -->
+        <section class="panel mb-6">
+            <div class="row px-4 py-2 flex items-center" style="background: var(--panel-2);">
+                <span class="label flex-1">Site</span>
+                <span class="label w-20 text-right">Used</span>
+                <span class="label w-20 text-right">Budget</span>
+                <span class="label w-32 text-center">Progress</span>
+                <span class="label w-28 text-right">Status</span>
+                <span class="label w-16 text-center">Block</span>
+            </div>
+
+            <div class="row px-4 py-3 flex items-center hover:bg-white/5">
+                <span class="flex-1 flex items-center gap-3">
+                    <span class="w-2 h-2 rounded-full" style="background: var(--bad)"></span>
+                    <span>Instagram</span>
+                </span>
+                <span class="num w-20 text-right">62m</span>
+                <span class="num w-20 text-right" style="color: var(--ink-3)">60m</span>
+                <span class="w-32 px-2">
+                    <span class="block h-1 rounded-full overflow-hidden" style="background: var(--line)"><span class="block h-full" style="width: 100%; background: var(--bad)"></span></span>
+                </span>
+                <span class="w-28 text-right"><span class="chip" style="background: rgba(235,87,87,0.15); color: var(--bad)">Over budget</span></span>
+                <span class="w-16 flex justify-center"><div class="ls-switch on"></div></span>
+            </div>
+
+            <div class="row px-4 py-3 flex items-center hover:bg-white/5">
+                <span class="flex-1 flex items-center gap-3">
+                    <span class="w-2 h-2 rounded-full" style="background: var(--warn)"></span>
+                    <span>Reddit</span>
+                </span>
+                <span class="num w-20 text-right">48m</span>
+                <span class="num w-20 text-right" style="color: var(--ink-3)">60m</span>
+                <span class="w-32 px-2">
+                    <span class="block h-1 rounded-full overflow-hidden" style="background: var(--line)"><span class="block h-full" style="width: 80%; background: var(--warn)"></span></span>
+                </span>
+                <span class="w-28 text-right"><span class="chip" style="background: rgba(255,178,36,0.12); color: var(--warn)">12m left</span></span>
+                <span class="w-16 flex justify-center"><div class="ls-switch on"></div></span>
+            </div>
+
+            <div class="row px-4 py-3 flex items-center hover:bg-white/5">
+                <span class="flex-1 flex items-center gap-3">
+                    <span class="w-2 h-2 rounded-full" style="background: var(--good)"></span>
+                    <span>YouTube</span>
+                </span>
+                <span class="num w-20 text-right">21m</span>
+                <span class="num w-20 text-right" style="color: var(--ink-3)">60m</span>
+                <span class="w-32 px-2">
+                    <span class="block h-1 rounded-full overflow-hidden" style="background: var(--line)"><span class="block h-full" style="width: 35%; background: var(--accent)"></span></span>
+                </span>
+                <span class="w-28 text-right"><span class="chip" style="background: rgba(76,183,130,0.12); color: var(--good)">On track</span></span>
+                <span class="w-16 flex justify-center"><div class="ls-switch"></div></span>
+            </div>
+
+            <div class="row px-4 py-3 flex items-center hover:bg-white/5">
+                <span class="flex-1 flex items-center gap-3">
+                    <span class="w-2 h-2 rounded-full" style="background: var(--good)"></span>
+                    <span>Twitter/X</span>
+                </span>
+                <span class="num w-20 text-right">5m</span>
+                <span class="num w-20 text-right" style="color: var(--ink-3)">60m</span>
+                <span class="w-32 px-2">
+                    <span class="block h-1 rounded-full overflow-hidden" style="background: var(--line)"><span class="block h-full" style="width: 8%; background: var(--accent)"></span></span>
+                </span>
+                <span class="w-28 text-right"><span class="chip" style="background: rgba(76,183,130,0.12); color: var(--good)">On track</span></span>
+                <span class="w-16 flex justify-center"><div class="ls-switch"></div></span>
+            </div>
+
+            <div class="row px-4 py-3 flex items-center hover:bg-white/5" style="opacity: 0.7;">
+                <span class="flex-1 flex items-center gap-3">
+                    <span class="w-2 h-2 rounded-full" style="background: var(--ink-3)"></span>
+                    <span>Facebook</span>
+                </span>
+                <span class="num w-20 text-right" style="color: var(--ink-3)">0m</span>
+                <span class="num w-20 text-right" style="color: var(--ink-3)">60m</span>
+                <span class="w-32 px-2">
+                    <span class="block h-1 rounded-full overflow-hidden" style="background: var(--line)"></span>
+                </span>
+                <span class="w-28 text-right"><span class="chip" style="background: var(--line); color: var(--ink-2);">Blocked</span></span>
+                <span class="w-16 flex justify-center"><div class="ls-switch on"></div></span>
+            </div>
+        </section>
+
+        <!-- Footer with shortcut hints -->
+        <footer class="flex items-center justify-between text-xs" style="color: var(--ink-3)">
+            <span>Tap any row to inspect &middot; Hold <kbd>Shift</kbd> + click switch for "Lock today"</span>
+            <span>v1.0.0 &middot; <span class="grad-text font-semibold">unsigned dev build</span></span>
+        </footer>
+
+        <!-- Notes -->
+        <section class="panel p-5 mt-8 text-xs space-y-2" style="color: var(--ink-2)">
+            <h3 class="font-semibold text-sm mb-2" style="color: var(--ink)">Aesthetic notes</h3>
+            <ul class="space-y-1.5 list-disc list-inside">
+                <li>13px base size. Information density: this single screen replaces 3 scrolls of the current UI.</li>
+                <li>Table-style site rows align numbers so your eye scans down columns &mdash; trivially easier to spot the over-budget row.</li>
+                <li>Status dots and chips are the visual primitives. No bars-only, no emoji.</li>
+                <li>Subtle indigo gradient as the brand accent. Used sparingly.</li>
+                <li>Cmd-K palette and keyboard hints make heavy daily use less click-y.</li>
+                <li>Dark by default. The aesthetic doesn&rsquo;t translate well to light mode.</li>
+            </ul>
+        </section>
+    </div>
+</body>
+</html>

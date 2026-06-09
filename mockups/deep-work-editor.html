@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<!--
+DEEP WORK EDITOR MOCKUP
+Shows the proposed editable block list section (idle state) and the force-disabled
+state when a session is active. In production this lives inside the Dashboard tab.
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Deep Work Editor Mockup</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        .chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 9999px; }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-gray-800 via-gray-900 to-gray-800 text-white min-h-screen">
+
+    <div class="max-w-5xl mx-auto p-10 space-y-10">
+
+        <header class="text-center">
+            <h1 class="text-4xl font-bold text-cyan-400 mb-2">Deep Work editor &mdash; mockup</h1>
+            <p class="text-gray-400">Two views: idle (editable) and session-active (force-disabled).</p>
+        </header>
+
+        <!-- ============================================== -->
+        <!-- STATE 1: idle (no deep-work session running)  -->
+        <!-- ============================================== -->
+        <section class="bg-gray-800/80 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-700/50 p-8">
+            <header class="flex items-center justify-between mb-6">
+                <div class="flex items-center gap-3">
+                    <svg class="w-7 h-7 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                    <h2 class="text-2xl font-bold">Deep Work</h2>
+                </div>
+                <span class="text-xs text-gray-400 bg-gray-700/50 rounded-full px-3 py-1">Idle &mdash; not running</span>
+            </header>
+
+            <p class="text-gray-300 mb-6 text-sm">
+                When a session starts, every site below is blocked at the hosts file. The blocks lift automatically when the timer ends.
+            </p>
+
+            <!-- Duration selector + start -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+                <div class="md:col-span-2 flex items-center gap-3 bg-gray-900/70 border border-gray-700 rounded-lg px-4 py-3">
+                    <label class="text-sm text-gray-400">Duration</label>
+                    <input type="number" value="60" class="w-20 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-center" />
+                    <select class="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white">
+                        <option>minutes</option>
+                        <option>hours</option>
+                    </select>
+                </div>
+                <button class="bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-3 rounded-lg shadow-lg">Start Deep Work</button>
+            </div>
+
+            <!-- Default sites checkbox list -->
+            <div>
+                <h3 class="text-sm uppercase tracking-wider text-cyan-400 mb-3 font-semibold">Default block list</h3>
+                <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
+                    <label class="flex items-center gap-3 bg-gray-900/50 border border-gray-700 rounded-lg px-3 py-2 hover:bg-gray-900 cursor-pointer">
+                        <input type="checkbox" checked class="w-4 h-4 accent-cyan-500" />
+                        <span class="text-sm">Instagram</span>
+                    </label>
+                    <label class="flex items-center gap-3 bg-gray-900/50 border border-gray-700 rounded-lg px-3 py-2 hover:bg-gray-900 cursor-pointer">
+                        <input type="checkbox" checked class="w-4 h-4 accent-cyan-500" />
+                        <span class="text-sm">Facebook</span>
+                    </label>
+                    <label class="flex items-center gap-3 bg-gray-900/50 border border-gray-700 rounded-lg px-3 py-2 hover:bg-gray-900 cursor-pointer">
+                        <input type="checkbox" checked class="w-4 h-4 accent-cyan-500" />
+                        <span class="text-sm">Twitter/X</span>
+                    </label>
+                    <label class="flex items-center gap-3 bg-gray-900/50 border border-gray-700 rounded-lg px-3 py-2 hover:bg-gray-900 cursor-pointer">
+                        <input type="checkbox" checked class="w-4 h-4 accent-cyan-500" />
+                        <span class="text-sm">Reddit</span>
+                    </label>
+                    <label class="flex items-center gap-3 bg-gray-900/50 border border-gray-700 rounded-lg px-3 py-2 hover:bg-gray-900 cursor-pointer">
+                        <input type="checkbox" checked class="w-4 h-4 accent-cyan-500" />
+                        <span class="text-sm">YouTube</span>
+                    </label>
+                    <label class="flex items-center gap-3 bg-gray-900/50 border border-gray-700 rounded-lg px-3 py-2 hover:bg-gray-900 cursor-pointer">
+                        <input type="checkbox" checked class="w-4 h-4 accent-cyan-500" />
+                        <span class="text-sm">Messenger</span>
+                    </label>
+                </div>
+
+                <!-- Custom domain editor -->
+                <h3 class="text-sm uppercase tracking-wider text-cyan-400 mt-6 mb-3 font-semibold">Custom domains</h3>
+                <div class="flex flex-wrap gap-2 mb-3">
+                    <span class="chip bg-purple-700/40 border border-purple-500/40 text-purple-100 text-sm">
+                        news.ycombinator.com
+                        <button class="text-purple-200 hover:text-white">&times;</button>
+                    </span>
+                    <span class="chip bg-purple-700/40 border border-purple-500/40 text-purple-100 text-sm">
+                        chess.com
+                        <button class="text-purple-200 hover:text-white">&times;</button>
+                    </span>
+                </div>
+                <div class="flex gap-2">
+                    <input type="text" placeholder="add another domain&hellip;" class="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm placeholder-gray-500" />
+                    <button class="bg-purple-600 hover:bg-purple-500 text-white font-semibold px-4 rounded-lg text-sm">Add</button>
+                </div>
+                <p class="text-[11px] text-gray-500 mt-2">Custom domains are blocked in addition to the checked defaults whenever Deep Work runs.</p>
+            </div>
+        </section>
+
+        <!-- =================================================== -->
+        <!-- STATE 2: session active &mdash; everything locked  -->
+        <!-- =================================================== -->
+        <section class="bg-gray-800/80 backdrop-blur-sm rounded-xl shadow-2xl border-2 border-cyan-500/50 p-8 relative overflow-hidden">
+            <!-- Live banner -->
+            <div class="absolute -top-px left-0 right-0 bg-cyan-600 text-white text-center py-2 font-bold tracking-wide text-sm">
+                DEEP WORK IN PROGRESS &mdash; 1h 14m remaining
+            </div>
+
+            <div class="pt-10">
+                <header class="flex items-center justify-between mb-6">
+                    <div class="flex items-center gap-3">
+                        <svg class="w-7 h-7 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                        <h2 class="text-2xl font-bold">Deep Work</h2>
+                    </div>
+                    <span class="text-xs text-cyan-200 bg-cyan-700/40 rounded-full px-3 py-1 font-semibold">Session active</span>
+                </header>
+
+                <!-- All site toggles in dashboard are forced disabled -->
+                <h3 class="text-sm uppercase tracking-wider text-amber-400 mb-3 font-semibold">Site toggles are locked until the session ends</h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 opacity-60">
+                    <div class="flex items-center justify-between bg-gray-900/70 border border-gray-700 rounded-lg px-4 py-3">
+                        <span class="flex items-center gap-3"><span class="font-semibold">Instagram</span><span class="chip bg-cyan-700/40 text-[10px] text-cyan-200">DEEP WORK</span></span>
+                        <input type="checkbox" checked disabled class="w-5 h-5 accent-cyan-500 cursor-not-allowed" />
+                    </div>
+                    <div class="flex items-center justify-between bg-gray-900/70 border border-gray-700 rounded-lg px-4 py-3">
+                        <span class="flex items-center gap-3"><span class="font-semibold">Facebook</span><span class="chip bg-cyan-700/40 text-[10px] text-cyan-200">DEEP WORK</span></span>
+                        <input type="checkbox" checked disabled class="w-5 h-5 accent-cyan-500 cursor-not-allowed" />
+                    </div>
+                    <div class="flex items-center justify-between bg-gray-900/70 border border-gray-700 rounded-lg px-4 py-3">
+                        <span class="flex items-center gap-3"><span class="font-semibold">Twitter/X</span><span class="chip bg-cyan-700/40 text-[10px] text-cyan-200">DEEP WORK</span></span>
+                        <input type="checkbox" checked disabled class="w-5 h-5 accent-cyan-500 cursor-not-allowed" />
+                    </div>
+                    <div class="flex items-center justify-between bg-gray-900/70 border border-gray-700 rounded-lg px-4 py-3">
+                        <span class="flex items-center gap-3"><span class="font-semibold">Reddit</span><span class="chip bg-cyan-700/40 text-[10px] text-cyan-200">DEEP WORK</span></span>
+                        <input type="checkbox" checked disabled class="w-5 h-5 accent-cyan-500 cursor-not-allowed" />
+                    </div>
+                </div>
+
+                <!-- End session button (deliberately small/non-destructive) -->
+                <div class="mt-6 flex justify-end">
+                    <button class="text-sm text-gray-400 hover:text-gray-200 underline">
+                        End session early (requires commitment paragraph)
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Behavior summary -->
+        <section class="bg-gray-800 rounded-lg p-5 text-sm text-gray-200 space-y-3">
+            <h2 class="text-lg font-semibold text-cyan-400">Behavior summary</h2>
+            <ul class="list-disc list-inside space-y-1 ml-2">
+                <li>On start: every checked site + every custom domain is appended to the hosts file in addition to your normal blocks.</li>
+                <li>Whilst running, the main dashboard&rsquo;s per-site checkboxes are <em>disabled</em> (not hidden) with a &ldquo;DEEP WORK&rdquo; badge to make the lock visible.</li>
+                <li>The Deep Work editor section itself becomes read-only (you can&rsquo;t change the default list or add/remove customs mid-session).</li>
+                <li>End-early goes through the existing commitment paragraph &mdash; same friction as undoing the blocker.</li>
+                <li>Session state is persisted; if you quit and relaunch, the timer resumes and hosts re-applies.</li>
+            </ul>
+        </section>
+    </div>
+</body>
+</html>

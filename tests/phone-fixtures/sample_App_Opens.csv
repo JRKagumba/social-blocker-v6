@@ -1,0 +1,7 @@
+Screenshot filename,Shown date,Date,Day,List order,App,Opened times,Metric label,Notes,Batch
+test-001.png,"Mon, Jan 5",2026-01-05,Mon,1,WhatsApp,75,Opened times,Synthetic,Test batch
+test-001.png,"Mon, Jan 5",2026-01-05,Mon,2,Messages,60,Opened times,Synthetic,Test batch
+test-001.png,"Mon, Jan 5",2026-01-05,Mon,3,Instagram,30,Opened times,Synthetic,Test batch
+test-002.png,"Tue, Jan 6",2026-01-06,Tue,1,Messages,120,Opened times,Synthetic,Test batch
+test-002.png,"Tue, Jan 6",2026-01-06,Tue,2,YouTube,40,Opened times,Synthetic,Test batch
+test-003.png,"Wed, Jan 7",2026-01-07,Wed,1,Instagram,55,Opened times,Synthetic,Test batch

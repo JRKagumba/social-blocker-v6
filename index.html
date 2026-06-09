@@ -1,178 +1,1286 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <title>Social Blocker v6</title>
     <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net;"/>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-</head>
-<body class="bg-gradient-to-br from-gray-800 via-gray-900 to-gray-800 text-white font-sans select-none">
 
-    <!-- Deep Work Timer Bar -->
-    <div id="deep-work-banner" class="hidden bg-cyan-600 text-white text-center p-2 font-bold text-lg fixed top-0 left-0 right-0 z-50">
-        <span id="deep-work-timer"></span>
+    <style>
+        /* ===========================================================
+           Linear-inspired design system. Dark, dense, sharp.
+           Every numeric value uses tabular-nums for column alignment.
+           =========================================================== */
+        :root {
+            --bg: #08090a;
+            --bg-2: #0c0d0e;
+            --panel: #0f1011;
+            --panel-2: #131415;
+            --panel-3: #18191b;
+            --line: #1c1d1f;
+            --line-2: #26272a;
+            --ink: #e6e6e6;
+            --ink-2: #9ca0a8;
+            --ink-3: #5b6066;
+            --ink-4: #3f4348;
+            --accent: #5e6ad2;
+            --accent-2: #8b95f8;
+            --good: #4cb782;
+            --warn: #ffb224;
+            --bad:  #eb5757;
+            --grad: linear-gradient(180deg, #5e6ad2 0%, #8b95f8 100%);
+        }
+
+        html, body {
+            background: var(--bg);
+            color: var(--ink);
+            font-family: "Inter", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+            font-size: 13px;
+            -webkit-font-smoothing: antialiased;
+            line-height: 1.5;
+        }
+        body { user-select: none; }
+
+        /* Numeric column alignment everywhere we show minutes/limits/counts. */
+        .num, .font-mono {
+            font-feature-settings: "tnum";
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* Surfaces */
+        .panel    { background: var(--panel);   border: 1px solid var(--line); border-radius: 8px; }
+        .panel-2  { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; }
+        .row      { border-bottom: 1px solid var(--line); }
+        .row:last-child { border-bottom: none; }
+
+        /* Linear-style typography helpers */
+        .label {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--ink-3);
+            font-weight: 600;
+        }
+        .grad-text {
+            background: var(--grad);
+            background-clip: text;
+            -webkit-background-clip: text;
+            color: transparent;
+        }
+
+        /* Compact chips for inline status/badges. */
+        .chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 1px 7px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+        .chip-good { background: rgba(76,183,130,0.12); color: var(--good); }
+        .chip-warn { background: rgba(255,178,36,0.12); color: var(--warn); }
+        .chip-bad  { background: rgba(235,87,87,0.15); color: var(--bad); }
+        .chip-mute { background: var(--line); color: var(--ink-2); }
+        .chip-accent { background: rgba(94,106,210,0.15); color: var(--accent-2); }
+
+        kbd {
+            background: var(--panel-2);
+            border: 1px solid var(--line);
+            border-bottom-width: 2px;
+            border-radius: 4px;
+            padding: 2px 6px;
+            font-size: 11px;
+            font-family: ui-monospace, monospace;
+            color: var(--ink-2);
+        }
+
+        /* Tabs (sharp, no big underlines) */
+        .tab-btn {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--ink-3);
+            padding: 8px 12px;
+            border-radius: 6px;
+            transition: color 0.12s, background-color 0.12s;
+            cursor: pointer;
+            border: 1px solid transparent;
+        }
+        .tab-btn:hover { color: var(--ink); background: var(--panel-2); }
+        .tab-active {
+            color: var(--ink) !important;
+            background: var(--panel-2) !important;
+            border-color: var(--line) !important;
+        }
+        .tab-inactive {
+            color: var(--ink-3);
+        }
+
+        /* Inputs */
+        input[type="number"], input[type="text"], input[type="time"], textarea, select {
+            background: var(--bg-2);
+            border: 1px solid var(--line);
+            color: var(--ink);
+            /* Tell Chromium to render native UI chrome (time picker, AM/PM
+               dropdown, spinners) in dark mode so they match our palette. */
+            color-scheme: dark;
+            border-radius: 6px;
+            padding: 6px 9px;
+            font-size: 13px;
+            font-family: inherit;
+        }
+        input[type="number"]:focus, input[type="text"]:focus, input[type="time"]:focus, textarea:focus, select:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 1px var(--accent);
+        }
+
+        /* The native clock icon next to <input type="time"> renders dark
+           by default — invert it so it's visible on our dark background. */
+        input[type="time"]::-webkit-calendar-picker-indicator {
+            filter: invert(1) brightness(1.2);
+            opacity: 0.7;
+            cursor: pointer;
+        }
+        input[type="time"]::-webkit-calendar-picker-indicator:hover {
+            opacity: 1;
+        }
+        /* Kill the native Windows number-input spinners; they clash hard with
+           the Linear aesthetic. Users can still type, use up/down arrow keys
+           when focused, or scroll-wheel to nudge the value. */
+        input[type="number"]::-webkit-inner-spin-button,
+        input[type="number"]::-webkit-outer-spin-button {
+            -webkit-appearance: none;
+            appearance: none;
+            margin: 0;
+        }
+        input[type="checkbox"] { accent-color: var(--accent); }
+
+        /* Buttons */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            padding: 6px 11px;
+            font-size: 13px;
+            font-weight: 500;
+            border-radius: 6px;
+            background: var(--panel-2);
+            color: var(--ink);
+            border: 1px solid var(--line);
+            transition: background-color 0.12s, border-color 0.12s, color 0.12s;
+            cursor: pointer;
+        }
+        .btn:hover { background: var(--panel-3); border-color: var(--line-2); }
+        .btn-primary {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: white;
+        }
+        .btn-primary:hover { background: #4e58b8; border-color: #4e58b8; }
+        .btn-primary:disabled, .btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+        .btn-danger {
+            background: rgba(235,87,87,0.12);
+            border-color: rgba(235,87,87,0.3);
+            color: var(--bad);
+        }
+        .btn-danger:hover { background: rgba(235,87,87,0.2); border-color: var(--bad); }
+        .btn-warn {
+            background: rgba(255,178,36,0.12);
+            border-color: rgba(255,178,36,0.3);
+            color: var(--warn);
+        }
+        .btn-warn:hover { background: rgba(255,178,36,0.2); border-color: var(--warn); }
+        .btn-ghost { background: transparent; }
+        .btn-ghost:hover { background: var(--panel-2); }
+
+        /* Pill toggle — replaces the old gray rect toggle. Linear-flavoured. */
+        .ls-switch-wrap { position: relative; display: inline-flex; align-items: center; }
+        .ls-switch-track {
+            width: 30px;
+            height: 17px;
+            background: var(--line);
+            border-radius: 9999px;
+            position: relative;
+            transition: background-color 0.15s;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+        .ls-switch-track::after {
+            content: "";
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 13px;
+            height: 13px;
+            background: var(--ink-2);
+            border-radius: 9999px;
+            transition: transform 0.15s, background-color 0.15s;
+        }
+        /* Legacy toggle wrapper still emitted by renderer.js — drive it via the inner peer checkbox. */
+        input.individual-toggle:checked ~ .toggle-bg {
+            background: var(--accent) !important;
+        }
+        input.individual-toggle:checked ~ .toggle-dot {
+            transform: translateX(13px);
+            background: white !important;
+        }
+        input.individual-toggle ~ .toggle-bg {
+            width: 30px; height: 17px;
+            background: var(--line);
+            border-radius: 9999px;
+            transition: background-color 0.15s;
+        }
+        input.individual-toggle ~ .toggle-dot {
+            top: 2px; left: 2px;
+            width: 13px; height: 13px;
+            background: var(--ink-2);
+            border-radius: 9999px;
+            transition: transform 0.15s, background-color 0.15s;
+            position: absolute;
+        }
+        input.individual-toggle:disabled ~ .toggle-bg { background: var(--line); opacity: 0.5; }
+        input.individual-toggle:disabled ~ .toggle-dot { background: var(--ink-4); opacity: 0.6; }
+
+        /* Limit input inside site rows: feels like a click-to-edit cell.
+           Borderless at rest, subtle bg on hover, full focus ring when active. */
+        .limit-input {
+            width: 46px !important;
+            text-align: right;
+            padding: 2px 6px !important;
+            font-size: 12px !important;
+            background: transparent !important;
+            border: 1px solid transparent !important;
+            box-shadow: none !important;
+            color: var(--ink) !important;
+            border-radius: 4px;
+            transition: background-color 0.12s, border-color 0.12s;
+        }
+        .limit-input:hover {
+            background: var(--panel-2) !important;
+            border-color: var(--line) !important;
+        }
+        .limit-input:focus {
+            background: var(--bg-2) !important;
+            border-color: var(--accent) !important;
+            box-shadow: 0 0 0 1px var(--accent) !important;
+        }
+
+        /* Status dot prefix on each site row */
+        .site-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 9999px;
+            flex-shrink: 0;
+        }
+
+        /* Sticky banners stacked at top */
+        .top-banner {
+            position: fixed;
+            left: 0;
+            right: 0;
+            padding: 6px 16px;
+            font-size: 12px;
+            font-weight: 500;
+            z-index: 40;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+        }
+
+        /* Heatmap cells (Data tab) */
+        .heat-cell {
+            width: 22px;
+            height: 22px;
+            border: 1px solid var(--line);
+            border-radius: 3px;
+            cursor: pointer;
+            transition: opacity 0.12s, transform 0.12s;
+        }
+        .heat-cell:hover { opacity: 0.7; transform: scale(1.1); }
+        .heat-none  { background: var(--panel); }
+        .heat-low   { background: rgba(94,106,210,0.35); }
+        .heat-med   { background: rgba(255,178,36,0.55); }
+        .heat-high  { background: rgba(235,87,87,0.75); }
+
+        /* Modal */
+        #commitment-modal {
+            position: fixed; inset: 0;
+            background: rgba(0,0,0,0.75);
+            backdrop-filter: blur(4px);
+            z-index: 60;
+            display: flex; align-items: center; justify-content: center;
+        }
+        #commitment-modal.hidden { display: none; }
+
+        /* Schedule modal — same hide/show pattern as commitment-modal.
+           Inline display:flex on the markup would override Tailwind's
+           .hidden { display:none } because inline styles win on specificity;
+           keep everything in stylesheet rules so .hidden actually works. */
+        #schedule-modal {
+            position: fixed; inset: 0;
+            background: rgba(0,0,0,0.75);
+            backdrop-filter: blur(4px);
+            z-index: 60;
+            display: flex; align-items: center; justify-content: center;
+        }
+        #schedule-modal.hidden { display: none; }
+
+        #commitment-modal #modal-content {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            padding: 26px;
+            max-width: 560px;
+            width: 90%;
+            transform: scale(0.96);
+            opacity: 0;
+            transition: transform 0.15s, opacity 0.15s;
+        }
+        #commitment-modal:not(.hidden) #modal-content {
+            transform: scale(1);
+            opacity: 1;
+        }
+
+        /* Tab content fade */
+        .tab-content { animation: fadeIn 0.15s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: var(--bg); }
+        ::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--ink-4); }
+
+        /* Hide spinner arrows in number inputs on Firefox */
+        input[type=number] { -moz-appearance: textfield; appearance: textfield; }
+    </style>
+</head>
+<body>
+
+    <!-- ============================================================
+         TOP-STACKED BANNERS
+         Each one is fixed-position; renderer.js maintains the stacking
+         order via syncBannerStackPlacement() (deep work first, then
+         hosts integrity, then pending changes).
+         ============================================================ -->
+
+    <!-- Deep Work session banner -->
+    <div id="deep-work-banner"
+         class="top-banner hidden"
+         style="top: 0; background: var(--accent); color: white;">
+        <span id="deep-work-timer" class="num"></span>
     </div>
 
-    <div class="container mx-auto p-12 max-w-5xl min-h-screen pt-20">
-        <header class="text-center mb-12">
-            <h1 class="text-5xl font-bold text-cyan-400 mb-4">Social Blocker v6</h1>
-            <p class="text-gray-300 text-lg">Set your limits. Reclaim your time.</p>
+    <!-- Hosts integrity / repair banner (was missing in old HTML; renderer.js refs it) -->
+    <div id="hosts-integrity-banner"
+         class="top-banner hidden"
+         style="top: 0; background: rgba(255,178,36,0.12); border-bottom: 1px solid var(--warn); color: var(--warn);">
+        <span id="hosts-integrity-text">Hosts file out of sync with the app.</span>
+        <button id="hosts-repair-btn" class="btn btn-warn" style="padding: 3px 10px;">Repair now</button>
+    </div>
+
+    <!-- Pending changes (Save & Apply) banner -->
+    <div id="pending-changes-banner"
+         class="top-banner hidden"
+         style="top: 0; background: rgba(94,106,210,0.12); border-bottom: 1px solid var(--accent); color: var(--accent-2);">
+        <span id="pending-changes-text" class="num">You have unsaved changes</span>
+        <span class="flex items-center gap-2">
+            <button id="revert-changes-btn" class="btn btn-ghost" style="padding: 3px 10px;">Revert</button>
+            <button id="apply-changes-btn" class="btn btn-primary" style="padding: 3px 10px;">Save &amp; Apply <kbd style="margin-left:6px;">Ctrl S</kbd></button>
+        </span>
+    </div>
+
+    <!-- ============================================================
+         MAIN CONTAINER
+         ============================================================ -->
+    <div class="max-w-5xl mx-auto px-8 py-6" style="padding-top: 56px;">
+
+        <!-- Header: brand + path + tabs -->
+        <header class="flex items-center justify-between mb-6">
+            <div class="flex items-center gap-3">
+                <div class="w-6 h-6 rounded" style="background: var(--grad);"></div>
+                <span class="font-semibold" style="font-size:14px;">FocusGuard</span>
+                <span style="color: var(--ink-3);">/</span>
+                <span style="color: var(--ink-2);">v6 dashboard</span>
+            </div>
+            <nav class="flex items-center gap-1" aria-label="Tabs">
+                <button id="tab-dashboard" class="tab-btn tab-active">Dashboard</button>
+                <button id="tab-history"   class="tab-btn tab-inactive">Insights</button>
+                <button id="tab-data"      class="tab-btn tab-inactive">Data</button>
+                <button id="tab-settings"  class="tab-btn tab-inactive">Settings</button>
+            </nav>
         </header>
 
-        <!-- Tab Navigation -->
-        <div class="mb-12">
-            <div class="border-b border-gray-600">
-                <nav class="-mb-px flex space-x-12" aria-label="Tabs">
-                    <button id="tab-dashboard" class="tab-btn">Dashboard</button>
-                    <button id="tab-history" class="tab-btn">History</button>
-                    <button id="tab-data" class="tab-btn">Data</button>
-                </nav>
-            </div>
-        </div>
-
         <main>
-            <!-- Dashboard Content -->
+
+            <!-- ====================================================
+                 DASHBOARD TAB
+                 ==================================================== -->
             <div id="content-dashboard" class="tab-content">
-                <!-- Master Status, Website Controls, etc. -->
-                <div class="bg-gray-800/80 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-700/50 p-8 mb-10 flex items-center justify-between">
-                     <div class="flex items-center">
-                         <svg class="w-8 h-8 text-cyan-400 mr-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
-                        <span class="text-xl font-semibold">Master Blocker Status</span>
+
+                <!-- Pending changes preview (shows what Apply will do) -->
+                <div id="pending-changes-preview" class="panel mb-4 hidden p-4">
+                    <p class="label mb-2">Pending changes</p>
+                    <div id="will-block-list" class="text-xs mb-1" style="color: var(--bad);">
+                        Will block: <span id="will-block-sites" class="num"></span>
                     </div>
-                     <div class="flex items-center">
-                        <span id="status-indicator" class="mr-4 text-sm font-semibold opacity-0 transition-opacity">(Saving...)</span>
-                        <span id="blocker-status-text" class="mr-4 text-lg font-bold"></span>
+                    <div id="will-unblock-list" class="text-xs" style="color: var(--good);">
+                        Will unblock: <span id="will-unblock-sites" class="num"></span>
                     </div>
                 </div>
 
-                <div class="bg-gray-800/80 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-700/50 p-8 mb-10">
-                    <h2 class="text-3xl font-semibold mb-6 border-b border-gray-600 pb-3">Website Controls</h2>
-                    <ul id="blocked-sites-list" class="space-y-6"></ul>
-                </div>
+                <!-- Master + status strip -->
+                <section class="panel mb-4 px-4 py-3 flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                        <span class="w-2 h-2 rounded-full" style="background: var(--good);"></span>
+                        <span class="font-semibold" style="font-size:14px;">Master Blocker</span>
+                        <span class="num" id="blocker-status-text" style="color: var(--ink-2); font-size: 12px;">0 / 0 sites blocked</span>
+                    </div>
+                    <span id="status-indicator"
+                          class="opacity-0 transition-opacity text-xs num"
+                          style="color: var(--ink-3);">(Saving...)</span>
+                </section>
 
-                 <div class="bg-gray-800/80 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-700/50 p-8">
-                    <h2 class="text-3xl font-semibold mb-6">Focus Controls</h2>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div class="space-y-4">
-                             <label class="block text-sm font-medium text-gray-300 mb-3">Deep Work Session</label>
-                             <div class="grid grid-cols-2 gap-4 mb-4">
-                                 <div>
-                                     <input type="number" id="deep-work-hours" min="0" max="8" value="1" step="1" class="bg-gray-700/80 border border-gray-600 text-white text-sm rounded-lg focus:ring-cyan-500 focus:border-cyan-500 block w-full p-3 text-center" placeholder="0">
-                                     <span class="block text-xs text-gray-400 mt-1 text-center">hrs</span>
-                                 </div>
-                                 <div>
-                                     <input type="number" id="deep-work-minutes" min="0" max="59" value="0" step="1" class="bg-gray-700/80 border border-gray-600 text-white text-sm rounded-lg focus:ring-cyan-500 focus:border-cyan-500 block w-full p-3 text-center" placeholder="0">
-                                     <span class="block text-xs text-gray-400 mt-1 text-center">min</span>
-                                 </div>
-                             </div>
-                             <button id="deep-work-btn" class="w-full bg-cyan-600 hover:bg-cyan-700 font-bold py-3 px-6 rounded-lg transition-colors shadow-lg disabled:bg-gray-600 disabled:cursor-not-allowed">Start Deep Work</button>
+                <!-- ============================================
+                     SITE LIST PANEL
+                     Linear-style table. The renderer dynamically
+                     appends <li> rows into #blocked-sites-list.
+                     Header row below is static; renderer rows
+                     align by inline width helpers.
+                     ============================================ -->
+                <section class="panel mb-4">
+                    <div class="row px-4 py-2 flex items-center" style="background: var(--panel-2);">
+                        <span class="label flex-1">Site</span>
+                        <span class="label" style="width:96px;">Used</span>
+                        <span class="label" style="width:60px;">Limit</span>
+                        <span class="label" style="width:100px;">Progress</span>
+                        <span class="label" style="width:120px;">Status</span>
+                        <span class="label text-center" style="width:60px;">Block</span>
+                    </div>
+                    <ul id="blocked-sites-list" class="list-none"></ul>
+                </section>
+
+                <!-- ============================================
+                     DEEP WORK PANEL
+                     ============================================ -->
+                <section id="deep-work-card" class="panel relative overflow-hidden mb-4">
+
+                    <!-- Active banner shown only during session -->
+                    <div id="deep-work-active-banner"
+                         class="hidden absolute top-0 left-0 right-0 px-4 py-1.5 text-xs font-semibold tracking-wide"
+                         style="background: var(--accent); color: white;">
+                        DEEP WORK IN PROGRESS &mdash; <span id="deep-work-inline-timer" class="num">0m</span> remaining
+                    </div>
+
+                    <div class="p-4">
+                        <div class="flex items-center justify-between mb-3">
+                            <h2 class="font-semibold" style="font-size:14px;">Deep Work</h2>
+                            <span id="deep-work-status-pill" class="chip chip-mute">Idle &mdash; not running</span>
                         </div>
-                        <div class="space-y-4">
-                            <label class="block text-sm font-medium text-gray-300">Emergency Override</label>
-                            <button id="nuclear-option-btn" class="w-full bg-red-600 hover:bg-red-700 font-bold py-4 px-6 rounded-lg transition-colors shadow-lg">Nuclear Option</button>
+                        <p style="color: var(--ink-2); font-size:12px;" class="mb-4">
+                            Pick the sites you want locked, set a duration, and start. The blocks lift automatically when the timer ends.
+                        </p>
+
+                        <!-- Start row (duration + start button) -->
+                        <div id="deep-work-start-row" class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+                            <div class="md:col-span-2 grid grid-cols-2 gap-2">
+                                <div>
+                                    <input type="number" id="deep-work-hours" min="0" max="8" value="1" step="1" class="w-full text-center num">
+                                    <span class="label block mt-1 text-center">hrs</span>
+                                </div>
+                                <div>
+                                    <input type="number" id="deep-work-minutes" min="0" max="59" value="0" step="1" class="w-full text-center num">
+                                    <span class="label block mt-1 text-center">min</span>
+                                </div>
+                            </div>
+                            <button id="deep-work-btn" class="btn btn-primary">Start Deep Work</button>
+                        </div>
+
+                        <!-- Editor: defaults + custom domains -->
+                        <div id="deep-work-editor-section">
+                            <p class="label mb-2">Block list</p>
+                            <div id="deep-work-default-sites" class="grid grid-cols-2 md:grid-cols-3 gap-2 mb-4">
+                                <!-- Populated by renderer -->
+                            </div>
+
+                            <p class="label mb-2">Custom domains</p>
+                            <div id="deep-work-custom-chips" class="flex flex-wrap gap-2 mb-2 min-h-[1.5rem]">
+                                <!-- Populated by renderer -->
+                            </div>
+                            <div class="flex gap-2">
+                                <input type="text" id="deep-work-custom-input"
+                                       placeholder="add a domain (e.g. news.ycombinator.com)"
+                                       class="flex-1">
+                                <button id="deep-work-custom-add-btn" class="btn">Add</button>
+                            </div>
+                            <p class="mt-2" style="color: var(--ink-3); font-size: 11px;">
+                                Custom domains are blocked in addition to checked defaults whenever Deep Work runs.
+                            </p>
+                        </div>
+
+                        <!-- End-early control (visible only during active session) -->
+                        <div id="deep-work-end-early-row" class="hidden mt-4 flex justify-end">
+                            <button id="deep-work-end-early-btn" class="btn btn-ghost" style="color: var(--bad); padding: 4px 10px;">End session early</button>
+                        </div>
+
+                        <!-- =================== AUTO-SCHEDULE ==================== -->
+                        <div class="mt-5 pt-4" style="border-top: 1px solid var(--line);">
+                            <div class="flex items-center justify-between mb-1">
+                                <h3 class="font-semibold" style="font-size:13px;">Auto-schedule</h3>
+                                <div class="flex items-center" style="gap: 6px;">
+                                    <button id="schedule-clear-all-btn" class="btn hidden"
+                                            style="padding: 3px 10px; font-size: 12px; color: var(--danger);"
+                                            title="Delete every scheduled rule (irreversible)">
+                                        Delete all
+                                    </button>
+                                    <button id="schedule-add-btn" class="btn" style="padding: 3px 10px; font-size: 12px;">+ Add rule</button>
+                                </div>
+                            </div>
+                            <p style="color: var(--ink-3); font-size: 11px;" class="mb-3">
+                                Recurring sessions that start automatically. Uses your Deep Work block list above.
+                            </p>
+                            <p id="schedule-next-fire" class="num mb-3"
+                               style="font-size: 12px; color: var(--accent-2);">
+                                &mdash;
+                            </p>
+                            <ul id="schedule-rule-list" class="list-none">
+                                <!-- Populated by renderer -->
+                            </ul>
+                            <p id="schedule-empty-state" class="hidden"
+                               style="color: var(--ink-3); font-size: 12px; font-style: italic; padding: 8px 0;">
+                                No scheduled sessions yet. Click <span class="num">+ Add rule</span> to create one.
+                            </p>
+                        </div>
+
+                        <!-- Emergency Override (Nuclear) -->
+                        <div class="mt-5 pt-4" style="border-top: 1px solid var(--line);">
+                            <div class="flex items-center justify-between gap-4">
+                                <div>
+                                    <h3 class="font-semibold" style="font-size:13px; color: var(--bad);">Emergency Override</h3>
+                                    <p style="color: var(--ink-3); font-size: 11px;" class="mt-0.5">
+                                        Immediately blocks every site on your tracker list. Lifts at midnight.
+                                    </p>
+                                </div>
+                                <button id="nuclear-option-btn" class="btn btn-danger whitespace-nowrap">Nuclear Option</button>
+                            </div>
                         </div>
                     </div>
-                </div>
+                </section>
+
+                <!-- Footer hint -->
+                <footer class="flex items-center justify-between text-xs mt-6 mb-2" style="color: var(--ink-3);">
+                    <span>Tap any toggle to queue a change &middot; <kbd>Ctrl</kbd> + <kbd>S</kbd> to apply</span>
+                    <span>v1.2.0 &middot; <span class="grad-text font-semibold">unsigned dev build</span></span>
+                </footer>
             </div>
 
-            <!-- History Content -->
+            <!-- ====================================================
+                 HISTORY TAB
+                 ==================================================== -->
             <div id="content-history" class="tab-content hidden">
-                <!-- Overall Blocker Activity -->
-                <div class="bg-gray-800/80 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-700/50 p-8 mb-10">
-                    <h2 class="text-3xl font-semibold mb-2">Blocker Activity (Last 7 Days)</h2>
-                    <p class="text-gray-400 mb-6">Shows the number of times you manually enabled the blocker each day.</p>
-                    <canvas id="history-chart"></canvas>
-                </div>
 
-                <!-- Site-Specific Activity Table -->
-                <div class="bg-gray-800/80 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-700/50 p-8 mb-10">
-                    <h2 class="text-3xl font-semibold mb-2">Unblocked Sites Today</h2>
-                    <p class="text-gray-400 mb-6">Sites you've manually unblocked today - your distraction patterns revealed.</p>
-                    <div id="unblocks-table-container"></div>
-                </div>
-
-                <!-- Unblock Events Chart -->
-                <div class="bg-gray-800/80 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-700/50 p-8 mb-10">
-                    <h2 class="text-3xl font-semibold mb-2">Unblock Events by Site</h2>
-                    <p class="text-gray-400 mb-6">How many times you unblocked each site today.</p>
-                    <div id="unblocks-chart-container">
-                        <canvas id="unblocks-chart"></canvas>
+                <!-- =================== SCOPE TOGGLE (v1.7.0) ==================== -->
+                <!-- Segmented control: Desktop | Phone | Both.
+                     - Desktop: show only #insights-desktop-pane (existing panels).
+                     - Phone:   show only #insights-phone-pane (new panels).
+                     - Both:    show both, with section headers.
+                     Phone option is disabled until phone data exists. Renderer
+                     enforces enable/disable + persists last choice. -->
+                <section class="panel p-3 mb-4 flex items-center justify-between flex-wrap gap-2">
+                    <div>
+                        <p class="label">View scope</p>
+                        <p id="insights-scope-hint" style="font-size: 11px; color: var(--ink-3); margin-top: 2px;">
+                            Pick which device&rsquo;s data to show. Phone data is read-only.
+                        </p>
                     </div>
-                </div>
+                    <div role="group" aria-label="Insights scope" class="flex" style="border:1px solid var(--line); border-radius:6px; overflow:hidden;">
+                        <button id="insights-scope-desktop" class="insights-scope-btn"
+                                data-scope="desktop"
+                                style="padding:6px 14px; font-size:12px; background:var(--accent); color:white; border:none; cursor:pointer;">
+                            Desktop
+                        </button>
+                        <button id="insights-scope-phone" class="insights-scope-btn"
+                                data-scope="phone" disabled
+                                style="padding:6px 14px; font-size:12px; background:var(--panel-2); color:var(--ink-3); border:none; border-left:1px solid var(--line); cursor:not-allowed;"
+                                title="Import phone data in Settings first">
+                            Phone
+                        </button>
+                        <button id="insights-scope-both" class="insights-scope-btn"
+                                data-scope="both" disabled
+                                style="padding:6px 14px; font-size:12px; background:var(--panel-2); color:var(--ink-3); border:none; border-left:1px solid var(--line); cursor:not-allowed;"
+                                title="Import phone data in Settings first">
+                            Both
+                        </button>
+                    </div>
+                </section>
 
-                <!-- Usage Chart -->
-                <div class="bg-gray-800/80 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-700/50 p-8">
-                    <h2 class="text-3xl font-semibold mb-2">Time Spent by Site</h2>
-                    <p class="text-gray-400 mb-6">Total time spent on each site today.</p>
-                    <canvas id="usage-chart"></canvas>
+                <!-- ====================================================
+                     DESKTOP PANE — existing content (unchanged behavior;
+                     just wrapped so we can hide/show as one unit).
+                     ==================================================== -->
+                <div id="insights-desktop-pane">
+                    <p id="insights-desktop-pane-label" class="label mb-2 hidden">Desktop</p>
+
+                <!-- =================== 4 KPI CARDS ==================== -->
+                <section class="grid grid-cols-2 gap-3 mb-4" style="grid-template-columns: repeat(4, 1fr);">
+                    <div class="panel p-4">
+                        <p class="label mb-1">Today</p>
+                        <p id="insight-kpi-today-total" class="num font-semibold"
+                           style="font-size: 22px; color: var(--ink);">&mdash;</p>
+                        <p id="insight-kpi-today-top" style="font-size: 11px; color: var(--ink-3); margin-top: 2px;">
+                            Total social time
+                        </p>
+                    </div>
+                    <div class="panel p-4">
+                        <p class="label mb-1">Unblocks today</p>
+                        <p id="insight-kpi-unblocks" class="num font-semibold"
+                           style="font-size: 22px; color: var(--ink);">&mdash;</p>
+                        <p id="insight-kpi-unblocks-detail" style="font-size: 11px; color: var(--ink-3); margin-top: 2px;">
+                            Highest friction tier today
+                        </p>
+                    </div>
+                    <div class="panel p-4">
+                        <p class="label mb-1">Peak hour today</p>
+                        <p id="insight-kpi-peak-hour" class="num font-semibold"
+                           style="font-size: 22px; color: var(--ink);">&mdash;</p>
+                        <p id="insight-kpi-peak-detail" style="font-size: 11px; color: var(--ink-3); margin-top: 2px;">
+                            Most distracting hour
+                        </p>
+                    </div>
+                    <div class="panel p-4">
+                        <p class="label mb-1">This week</p>
+                        <p id="insight-kpi-week-total" class="num font-semibold"
+                           style="font-size: 22px; color: var(--ink);">&mdash;</p>
+                        <p id="insight-kpi-week-delta" style="font-size: 11px; color: var(--ink-3); margin-top: 2px;">
+                            vs last week
+                        </p>
+                    </div>
+                </section>
+
+                <!-- =================== THIS WEEK BAR CHART ==================== -->
+                <section class="panel p-5 mb-4">
+                    <p class="label mb-1">Weekly comparison</p>
+                    <h2 class="font-semibold mb-1" style="font-size: 15px;">This week vs last week</h2>
+                    <p id="insight-week-best" style="color: var(--ink-3); font-size: 12px;" class="mb-4">
+                        &mdash;
+                    </p>
+                    <!-- Chart.js with `responsive: true, maintainAspectRatio: false` sizes
+                         the canvas to fill its parent. A fixed-height wrapper is required;
+                         without it the canvas grows on every render and the whole page
+                         scrolls infinitely. -->
+                    <div style="position: relative; height: 220px;">
+                        <canvas id="insight-week-chart"></canvas>
+                    </div>
+                </section>
+
+                <!-- =================== TODAY'S FRICTION TIMELINE ==================== -->
+                <section class="panel p-5 mb-4">
+                    <p class="label mb-1">Friction timeline</p>
+                    <h2 class="font-semibold mb-1" style="font-size: 15px;">Every unblock you made today</h2>
+                    <p style="color: var(--ink-3); font-size: 12px;" class="mb-4">
+                        Chronological. The tier badge shows what the friction modal asked for at the moment.
+                    </p>
+                    <ul id="insight-friction-timeline" class="list-none">
+                        <!-- Populated by renderer -->
+                    </ul>
+                    <p id="insight-friction-empty" class="hidden"
+                       style="color: var(--ink-3); font-size: 12px; font-style: italic; padding: 6px 0;">
+                        Nothing unblocked yet today. Keep it up.
+                    </p>
+                </section>
+
                 </div>
+                <!-- /#insights-desktop-pane -->
+
+                <!-- ====================================================
+                     PHONE PANE (v1.7.0). Hidden unless scope is Phone or Both.
+                     Mirrors the desktop layout: 4 KPIs + week-over-week chart.
+                     No friction timeline (no analog on phone), no per-hour KPI
+                     (Digital Wellbeing is daily-aggregate only).
+                     ==================================================== -->
+                <div id="insights-phone-pane" class="hidden">
+                    <p id="insights-phone-pane-label" class="label mb-2 hidden" style="margin-top: 24px;">Phone</p>
+
+                    <!-- Phone KPI cards -->
+                    <section class="grid grid-cols-2 gap-3 mb-4" style="grid-template-columns: repeat(4, 1fr);">
+                        <div class="panel p-4">
+                            <p class="label mb-1">Today (phone)</p>
+                            <p id="phone-kpi-today-total" class="num font-semibold"
+                               style="font-size: 22px; color: var(--ink);">&mdash;</p>
+                            <p id="phone-kpi-today-detail" style="font-size: 11px; color: var(--ink-3); margin-top: 2px;">
+                                Total screen time
+                            </p>
+                        </div>
+                        <div class="panel p-4">
+                            <p class="label mb-1">Unlocks today</p>
+                            <p id="phone-kpi-unlocks" class="num font-semibold"
+                               style="font-size: 22px; color: var(--ink);">&mdash;</p>
+                            <p id="phone-kpi-unlocks-detail" style="font-size: 11px; color: var(--ink-3); margin-top: 2px;">
+                                Phone unlocks today
+                            </p>
+                        </div>
+                        <div class="panel p-4">
+                            <p class="label mb-1">Top app today</p>
+                            <p id="phone-kpi-top-app" class="num font-semibold"
+                               style="font-size: 18px; color: var(--ink);">&mdash;</p>
+                            <p id="phone-kpi-top-app-detail" style="font-size: 11px; color: var(--ink-3); margin-top: 2px;">
+                                Most screen time
+                            </p>
+                        </div>
+                        <div class="panel p-4">
+                            <p class="label mb-1">Top opened today</p>
+                            <p id="phone-kpi-top-opened" class="num font-semibold"
+                               style="font-size: 18px; color: var(--ink);">&mdash;</p>
+                            <p id="phone-kpi-top-opened-detail" style="font-size: 11px; color: var(--ink-3); margin-top: 2px;">
+                                Most launches
+                            </p>
+                        </div>
+                    </section>
+
+                    <!-- Phone week chart -->
+                    <section class="panel p-5 mb-4">
+                        <p class="label mb-1">Weekly comparison (phone)</p>
+                        <h2 class="font-semibold mb-1" style="font-size: 15px;">This week vs last week</h2>
+                        <p id="phone-week-best" style="color: var(--ink-3); font-size: 12px;" class="mb-4">
+                            &mdash;
+                        </p>
+                        <div style="position: relative; height: 220px;">
+                            <canvas id="phone-week-chart"></canvas>
+                        </div>
+                    </section>
+
+                    <!-- Empty-state placeholder. Shown whenever the user selects
+                         the Phone or Both scope but no phone data exists yet.
+                         The button routes to Settings -> Phone Data section
+                         and flashes the import button to draw the eye. -->
+                    <section id="phone-pane-empty" class="panel p-5 mb-4 hidden text-center">
+                        <p style="color: var(--ink); font-size: 14px; font-weight: 600; margin-bottom: 6px;">
+                            No phone data imported yet
+                        </p>
+                        <p style="color: var(--ink-3); font-size: 12px; margin-bottom: 14px;">
+                            Pick a folder containing your StayFree export or Digital Wellbeing CSVs.
+                        </p>
+                        <button id="phone-pane-empty-cta" class="btn"
+                                style="padding: 6px 14px; font-size: 12px; background: var(--accent); color: white; border: none;">
+                            Set up phone data &rarr;
+                        </button>
+                    </section>
+                </div>
+                <!-- /#insights-phone-pane -->
+
+                <!-- =================== ALL-TIME DATA (existing charts) ==================== -->
+                <p class="label mb-2" style="margin-top: 24px;">All-time data</p>
+
+                <section class="panel p-5 mb-4">
+                    <p class="label mb-1">Blocker activity</p>
+                    <h2 class="font-semibold mb-1" style="font-size: 15px;">Blocker activity, last 7 days</h2>
+                    <p style="color: var(--ink-3); font-size: 12px;" class="mb-4">
+                        Number of times you manually enabled the blocker each day.
+                    </p>
+                    <canvas id="history-chart" height="120"></canvas>
+                </section>
+
+                <section class="panel p-5 mb-4">
+                    <p class="label mb-1">Today&rsquo;s unblock log</p>
+                    <h2 class="font-semibold mb-1" style="font-size: 15px;">Sites you unblocked today</h2>
+                    <p style="color: var(--ink-3); font-size: 12px;" class="mb-4">
+                        Each row is a site you opted to keep open. Use this to spot patterns.
+                    </p>
+                    <div id="unblocks-table-container"></div>
+                </section>
+
+                <section class="panel p-5 mb-4">
+                    <p class="label mb-1">Unblock events by site</p>
+                    <h2 class="font-semibold mb-1" style="font-size: 15px;">How many times you unblocked each site today</h2>
+                    <div id="unblocks-chart-container" class="mt-3">
+                        <canvas id="unblocks-chart" height="120"></canvas>
+                    </div>
+                </section>
+
+                <section class="panel p-5">
+                    <p class="label mb-1">Time spent</p>
+                    <h2 class="font-semibold mb-1" style="font-size: 15px;">Time spent by site, today</h2>
+                    <canvas id="usage-chart" height="120" class="mt-3"></canvas>
+                </section>
             </div>
 
-            <!-- Data Content -->
+            <!-- ====================================================
+                 DATA TAB
+                 ==================================================== -->
             <div id="content-data" class="tab-content hidden">
-                <!-- Distraction Heat Map -->
-                <div class="bg-gray-800/80 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-700/50 p-8 mb-10">
-                    <h2 class="text-3xl font-semibold mb-6">Distraction Heat Map</h2>
-                    <p class="text-gray-300 mb-6 text-lg">Visual representation of when you're most likely to get distracted throughout the day</p>
-                    <div class="mb-6">
-                        <label for="heat-map-days" class="block text-sm font-medium text-gray-300 mb-3">Days to show:</label>
-                        <select id="heat-map-days" class="bg-gray-700/80 border border-gray-600 text-white text-sm rounded-lg focus:ring-cyan-500 focus:border-cyan-500 p-3">
-                            <option value="7">Last 7 Days</option>
-                            <option value="14">Last 14 Days</option>
-                            <option value="30">Last 30 Days</option>
+
+                <!-- Heat Map -->
+                <section class="panel p-5 mb-4">
+                    <p class="label mb-1">Distraction pattern</p>
+                    <h2 class="font-semibold mb-1" style="font-size: 15px;">Heat map &mdash; when you get distracted</h2>
+                    <p style="color: var(--ink-3); font-size: 12px;" class="mb-4">
+                        Each cell is one hour. Darker indigo = light use, amber = moderate, red = heavy.
+                    </p>
+
+                    <div class="flex items-center gap-3 mb-4">
+                        <label for="heat-map-days" class="label" style="margin: 0;">Range</label>
+                        <select id="heat-map-days" class="num">
+                            <option value="7">Last 7 days</option>
+                            <option value="14">Last 14 days</option>
+                            <option value="30">Last 30 days</option>
                         </select>
                     </div>
                     <div class="overflow-x-auto">
-                        <div id="heat-map-container" class="min-w-full">
-                            <!-- Heat map will be generated here -->
+                        <div id="heat-map-container" class="min-w-full"></div>
+                    </div>
+                </section>
+
+                <!-- Reports moved to Settings tab. Data tab is now heatmap-only. -->
+            </div>
+
+            <!-- ====================================================
+                 SETTINGS TAB
+                 ==================================================== -->
+            <div id="content-settings" class="tab-content hidden">
+
+                <!-- =================== UPDATES ==================== -->
+                <section class="panel p-5 mb-4">
+                    <p class="label mb-1">App updates</p>
+                    <h2 class="font-semibold mb-1" style="font-size: 15px;">Automatic updates</h2>
+                    <p style="color: var(--ink-3); font-size: 12px;" class="mb-4">
+                        The app checks GitHub Releases on launch and every 6 hours after. New versions
+                        download in the background and install when you next quit. You can also force a
+                        check or install a staged update right now.
+                    </p>
+
+                    <div class="panel-2 p-4 mb-3">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p style="font-size: 12px; color: var(--ink-2);">Current version</p>
+                                <p id="settings-current-version" class="num" style="font-size: 16px; font-weight: 600; color: var(--ink);">&mdash;</p>
+                            </div>
+                            <span id="settings-updater-pill" class="chip chip-mute">checking&hellip;</span>
+                        </div>
+                        <div id="settings-updater-status" class="mt-3" style="font-size: 12px; color: var(--ink-3); min-height: 1.4rem;">
+                            Waiting for status&hellip;
                         </div>
                     </div>
-                </div>
 
-                <!-- --- CHANGE HERE: Removed the confusing Limit Adherence chart --- -->
-                <!-- Limit Adherence Rate (REMOVED) -->
-                <!-- <div class="bg-gray-800/80 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-700/50 p-8">
-                    <h2 class="text-3xl font-semibold mb-6">Limit Adherence Rate</h2>
-                    <p class="text-gray-300 mb-6 text-lg">Percentage showing how many sites stayed within their limits each day</p>
-                    <div class="mb-6">
-                        <label for="adherence-days" class="block text-sm font-medium text-gray-300 mb-3">Days to show:</label>
-                        <select id="adherence-days" class="bg-gray-700/80 border border-gray-600 text-white text-sm rounded-lg focus:ring-cyan-500 focus:border-cyan-500 p-3">
-                            <option value="7">Last 7 Days</option>
-                            <option value="14">Last 14 Days</option>
-                            <option value="30">Last 30 Days</option>
-                        </select>
+                    <div class="flex flex-wrap gap-2">
+                        <button id="settings-check-update-btn" class="btn">Check for updates</button>
+                        <button id="settings-install-update-btn" class="btn btn-primary hidden">Restart &amp; install update</button>
+                        <a href="https://github.com/JRKagumba/social-blocker-v6/releases"
+                           class="btn btn-ghost" style="text-decoration:none;"
+                           id="settings-view-releases-link"
+                           target="_blank" rel="noopener">
+                            View all releases &rarr;
+                        </a>
                     </div>
-                    <canvas id="adherence-chart"></canvas>
-                </div> -->
+                </section>
+
+                <!-- =================== STARTUP ==================== -->
+                <section class="panel p-5 mb-4">
+                    <p class="label mb-1">Startup</p>
+                    <h2 class="font-semibold mb-1" style="font-size: 15px;">Launch behaviour</h2>
+                    <p style="color: var(--ink-3); font-size: 12px;" class="mb-4">
+                        Whether Social Blocker starts automatically when you sign into Windows.
+                        It launches minimized to the tray, so it doesn&rsquo;t interrupt your boot flow.
+                    </p>
+
+                    <label class="flex items-center justify-between cursor-pointer panel-2 p-3">
+                        <div>
+                            <p style="font-size: 13px; color: var(--ink);">Start with Windows</p>
+                            <p style="font-size: 11px; color: var(--ink-3); margin-top: 2px;">
+                                Recommended &mdash; otherwise the blocker only runs when you remember to launch it.
+                            </p>
+                        </div>
+                        <input type="checkbox" id="settings-startup-toggle" class="w-4 h-4">
+                    </label>
+                    <p id="settings-startup-hint" style="color: var(--ink-3); font-size: 11px;" class="mt-2">&nbsp;</p>
+                </section>
+
+                <!-- =================== HUD WIDGET ==================== -->
+                <section class="panel p-5 mb-4">
+                    <p class="label mb-1">HUD widget</p>
+                    <h2 class="font-semibold mb-1" style="font-size: 15px;">Always-on-top usage display</h2>
+                    <p style="color: var(--ink-3); font-size: 12px;" class="mb-4">
+                        A small 260&times;160 widget anchored to the bottom-right of your primary display.
+                        Shows live per-site usage so you don&rsquo;t have to open the main window.
+                    </p>
+
+                    <div class="panel-2 p-3 mb-2">
+                        <label class="flex items-center justify-between cursor-pointer">
+                            <div>
+                                <p style="font-size: 13px; color: var(--ink);">Show HUD widget</p>
+                                <p style="font-size: 11px; color: var(--ink-3); margin-top: 2px;">Toggle visibility immediately.</p>
+                            </div>
+                            <input type="checkbox" id="settings-hud-visible" class="w-4 h-4">
+                        </label>
+                    </div>
+                    <div class="panel-2 p-3 mb-2">
+                        <label class="flex items-center justify-between cursor-pointer">
+                            <div>
+                                <p style="font-size: 13px; color: var(--ink);">Auto-hide during fullscreen apps</p>
+                                <p style="font-size: 11px; color: var(--ink-3); margin-top: 2px;">
+                                    Stays out of the way for games / movies / presentations.
+                                </p>
+                            </div>
+                            <input type="checkbox" id="settings-hud-autohide" class="w-4 h-4">
+                        </label>
+                    </div>
+                    <div class="panel-2 p-3">
+                        <label class="flex items-center justify-between cursor-pointer">
+                            <div>
+                                <p style="font-size: 13px; color: var(--ink);">Click-through (ignore mouse)</p>
+                                <p style="font-size: 11px; color: var(--ink-3); margin-top: 2px;">
+                                    HUD becomes a pure overlay; you can&rsquo;t drag it. Click the tray icon to toggle off.
+                                </p>
+                            </div>
+                            <input type="checkbox" id="settings-hud-clickthrough" class="w-4 h-4">
+                        </label>
+                    </div>
+                </section>
+
+                <!-- =================== FRICTION ==================== -->
+                <section class="panel p-5 mb-4">
+                    <p class="label mb-1">Self-control</p>
+                    <h2 class="font-semibold mb-1" style="font-size: 15px;">Progressive friction</h2>
+                    <p style="color: var(--ink-3); font-size: 12px;" class="mb-4">
+                        Make each unblock more expensive than the last. The first cave today asks for one sentence;
+                        the fifth asks for the full paragraph plus a 60-second cooldown timer.
+                    </p>
+                    <div class="panel-2 p-3 mb-2">
+                        <label class="flex items-center justify-between cursor-pointer">
+                            <div>
+                                <p style="font-size: 13px; color: var(--ink);">Enable escalating friction</p>
+                                <p style="font-size: 11px; color: var(--ink-3); margin-top: 2px;">
+                                    When off, every unblock requires typing the full paragraph (legacy behaviour).
+                                </p>
+                            </div>
+                            <input type="checkbox" id="settings-friction-enabled" class="w-4 h-4" checked>
+                        </label>
+                    </div>
+                    <div class="num" style="font-size: 11px; color: var(--ink-3);">
+                        Ladder: 1st = 1 sentence \u00b7 2nd = 2 sentences \u00b7 3rd = 3 sentences \u00b7
+                        4th = 4 sentences + 15s cooldown \u00b7 5th+ = full paragraph + 60s cooldown
+                    </div>
+                </section>
+
+                <!-- =================== PHONE DATA (v1.7.0) ==================== -->
+                <section class="panel p-5 mb-4">
+                    <p class="label mb-1">Cross-device</p>
+                    <h2 class="font-semibold mb-1" style="font-size: 15px;">Phone usage data</h2>
+                    <p style="color: var(--ink-3); font-size: 12px;" class="mb-4">
+                        Import your Digital Wellbeing / StayFree exports so phone screen time and unlocks
+                        show up in Insights alongside your desktop usage.
+                        Read-only &mdash; this app can&rsquo;t block phone apps.
+                    </p>
+
+                    <!-- Supported sources. v1.8.0 auto-detects which parser
+                         to use from the folder contents, so this list is
+                         informational only (no radio selection needed). ADB
+                         live-sync is still planned. -->
+                    <div class="panel-2 p-4 mb-3">
+                        <p class="label mb-2">Supported sources (auto-detected)</p>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-2" style="font-size: 12px;">
+                            <div class="flex items-center gap-2">
+                                <span style="color: var(--success); font-weight: 600;">&#10003;</span>
+                                <span style="color: var(--ink);">StayFree export</span>
+                                <span style="color: var(--ink-3);">(3 CSVs)</span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <span style="color: var(--success); font-weight: 600;">&#10003;</span>
+                                <span style="color: var(--ink);">Digital Wellbeing OCR</span>
+                                <span style="color: var(--ink-3);">(4 CSVs)</span>
+                            </div>
+                            <div class="flex items-center gap-2 opacity-50">
+                                <span style="color: var(--ink-3);">&middot;</span>
+                                <span style="color: var(--ink-3);">ADB live sync (planned)</span>
+                            </div>
+                        </div>
+                        <p style="font-size: 11px; color: var(--ink-3);" class="mt-3">
+                            Pick a folder containing your CSVs; the importer figures out which format from the file names. If both source types are present, StayFree wins (direct OS measurement &gt; OCR).
+                        </p>
+                    </div>
+
+                    <!-- Status + import controls -->
+                    <div class="panel-2 p-4 mb-3">
+                        <div class="flex items-center justify-between gap-3 mb-3">
+                            <div class="flex-1 min-w-0">
+                                <p style="font-size: 13px; color: var(--ink);" class="font-semibold">Status</p>
+                                <p id="phone-status-line" style="font-size: 12px; color: var(--ink-3);" class="mt-0.5">
+                                    No phone data imported yet.
+                                </p>
+                                <p id="phone-status-folder" class="font-mono break-all hidden" style="font-size: 11px; color: var(--ink-3); margin-top: 4px;">
+                                    &mdash;
+                                </p>
+                            </div>
+                            <div class="flex gap-2">
+                                <button id="phone-pick-folder-btn" class="btn btn-primary" style="padding: 4px 10px; font-size: 12px;">
+                                    Pick folder &amp; import
+                                </button>
+                                <button id="phone-reimport-btn" class="btn hidden" style="padding: 4px 10px; font-size: 12px;">
+                                    Re-import last folder
+                                </button>
+                            </div>
+                        </div>
+                        <div id="phone-import-status" style="font-size: 12px; min-height: 1.25rem; color: var(--ink-3);">
+                            &nbsp;
+                        </div>
+                    </div>
+
+                    <!-- Weekly export reminder (v1.8.0).
+                         Until ADB live-sync ships, manual exports are the norm.
+                         A weekly notification keeps the data fresh without
+                         requiring you to remember the cadence. -->
+                    <div class="panel-2 p-4 mb-3">
+                        <p class="label mb-2">Weekly export reminder</p>
+                        <div class="flex items-center gap-3 mb-3">
+                            <label class="flex items-center gap-2 cursor-pointer" style="font-size: 12px;">
+                                <input type="checkbox" id="phone-reminder-enabled" class="w-3.5 h-3.5">
+                                <span style="color: var(--ink);">Enabled</span>
+                            </label>
+                        </div>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3" style="font-size: 12px;">
+                            <label>
+                                <span style="color: var(--ink-3); display:block; margin-bottom:4px;">Day of week</span>
+                                <select id="phone-reminder-day" class="num"
+                                        style="width:100%; background: var(--panel); border:1px solid var(--line); color: var(--ink); padding: 4px 8px; border-radius: 4px;">
+                                    <option value="0">Sunday</option>
+                                    <option value="1">Monday</option>
+                                    <option value="2">Tuesday</option>
+                                    <option value="3">Wednesday</option>
+                                    <option value="4">Thursday</option>
+                                    <option value="5">Friday</option>
+                                    <option value="6">Saturday</option>
+                                </select>
+                            </label>
+                            <label>
+                                <span style="color: var(--ink-3); display:block; margin-bottom:4px;">Hour (24h)</span>
+                                <select id="phone-reminder-hour" class="num"
+                                        style="width:100%; background: var(--panel); border:1px solid var(--line); color: var(--ink); padding: 4px 8px; border-radius: 4px;">
+                                    <!-- Populated by renderer (0-23). -->
+                                </select>
+                            </label>
+                            <div class="flex items-end">
+                                <button id="phone-reminder-test-btn" class="btn" style="padding: 4px 10px; font-size: 12px;">
+                                    Send test reminder
+                                </button>
+                            </div>
+                        </div>
+                        <p id="phone-reminder-status" style="font-size: 11px; color: var(--ink-3); min-height: 1.25rem;">
+                            &nbsp;
+                        </p>
+                    </div>
+
+                    <!-- Danger zone -->
+                    <div class="flex items-center justify-between gap-3">
+                        <p style="font-size: 11px; color: var(--ink-3);">
+                            Phone data is stored locally only. Nothing is uploaded.
+                        </p>
+                        <button id="phone-clear-btn" class="btn hidden" style="padding: 3px 10px; font-size: 11px; color: var(--danger);">
+                            Clear all phone data
+                        </button>
+                    </div>
+                </section>
+
+                <!-- =================== REPORTS ==================== -->
+                <section class="panel p-5 mb-4">
+                    <p class="label mb-1">Local digests</p>
+                    <h2 class="font-semibold mb-1" style="font-size: 15px;">Weekly &amp; monthly reports</h2>
+                    <p style="color: var(--ink-3); font-size: 12px;" class="mb-4">
+                        Self-contained HTML digests saved to your chosen folder. No email, no network &mdash;
+                        the file just opens in your browser.
+                    </p>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+                        <div class="panel-2 p-4">
+                            <p class="label mb-2">Save location</p>
+                            <p id="report-folder-display" class="font-mono break-all" style="font-size: 12px; color: var(--ink);">&mdash;</p>
+                            <p id="report-folder-hint" style="color: var(--ink-3); font-size: 11px;" class="mt-2">
+                                Folder will be created on first run if it doesn&rsquo;t exist yet.
+                            </p>
+                            <div class="flex gap-2 mt-3">
+                                <button id="open-report-folder-btn" class="btn" style="padding: 4px 10px; font-size: 12px;">Open folder</button>
+                                <button id="edit-report-folder-btn" class="btn" style="padding: 4px 10px; font-size: 12px;">Change&hellip;</button>
+                            </div>
+                        </div>
+                        <div class="panel-2 p-4">
+                            <p class="label mb-2">Auto-generation schedule</p>
+                            <label class="flex items-center gap-2 mb-1.5 cursor-pointer" style="font-size: 12px;">
+                                <input type="checkbox" id="report-weekly-toggle" class="w-3.5 h-3.5">
+                                Weekly &mdash; every Monday at 9 a.m.
+                            </label>
+                            <label class="flex items-center gap-2 mb-1.5 cursor-pointer" style="font-size: 12px;">
+                                <input type="checkbox" id="report-monthly-toggle" class="w-3.5 h-3.5">
+                                Monthly &mdash; 1st of each month at 9 a.m.
+                            </label>
+                            <label class="flex items-center gap-2 cursor-pointer" style="font-size: 12px;">
+                                <input type="checkbox" id="report-autoopen-toggle" class="w-3.5 h-3.5">
+                                Auto-open the file when generated
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="flex flex-wrap gap-2 mb-3">
+                        <button id="generate-weekly-now-btn" class="btn btn-primary">Generate last week&rsquo;s digest</button>
+                        <button id="generate-monthly-now-btn" class="btn">Generate last month&rsquo;s digest</button>
+                    </div>
+                    <div id="report-status" style="font-size: 12px; min-height: 1.5rem; color: var(--ink-3);"></div>
+                    <div style="color: var(--ink-3); font-size: 11px;" class="mt-2 num">
+                        Last weekly: <span id="report-last-weekly">&mdash;</span>
+                        &middot; Last monthly: <span id="report-last-monthly">&mdash;</span>
+                    </div>
+                </section>
+
+                <!-- =================== ABOUT ==================== -->
+                <section class="panel p-5">
+                    <p class="label mb-1">About</p>
+                    <h2 class="font-semibold mb-1" style="font-size: 15px;">Social Blocker v6</h2>
+                    <p style="color: var(--ink-3); font-size: 12px;" class="mb-3">
+                        A personal, local, hosts-file-based focus tool. Built with Electron.
+                        No telemetry, no network calls except the GitHub Releases check for updates.
+                    </p>
+                    <div class="num" style="font-size: 12px; color: var(--ink-2);">
+                        <div class="flex justify-between py-1" style="border-bottom: 1px solid var(--line);">
+                            <span>Version</span>
+                            <span id="settings-about-version" style="color: var(--ink);">&mdash;</span>
+                        </div>
+                        <div class="flex justify-between py-1" style="border-bottom: 1px solid var(--line);">
+                            <span>Built by</span>
+                            <span style="color: var(--ink);">Joe Kagumba</span>
+                        </div>
+                        <div class="flex justify-between py-1">
+                            <span>Source</span>
+                            <a href="https://github.com/JRKagumba/social-blocker-v6"
+                               class="grad-text font-semibold" style="text-decoration:none;"
+                               target="_blank" rel="noopener">github.com/JRKagumba/social-blocker-v6</a>
+                        </div>
+                    </div>
+                </section>
             </div>
         </main>
     </div>
 
-    <!-- Commitment Modal -->
-    <div id="commitment-modal" class="fixed inset-0 bg-black bg-opacity-80 backdrop-blur-sm flex items-center justify-center hidden z-50">
-        <div class="bg-gray-800/95 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-700/50 p-10 max-w-lg w-full transform transition-all scale-95 opacity-0" id="modal-content">
-            <h2 class="text-3xl font-bold mb-6 text-yellow-400">Commitment Required</h2>
-            <p class="text-gray-300 mb-6 text-lg">To increase this time limit, you must demonstrate your commitment to focus. Please type the following paragraph exactly as it appears. The backspace key is disabled.</p>
-            <p id="commitment-paragraph" class="text-gray-400 italic bg-gray-900/80 p-6 rounded-lg mb-6 select-all border border-gray-700"></p>
-            <textarea id="commitment-input" rows="6" class="w-full bg-gray-900/80 text-white rounded-lg p-4 focus:outline-none focus:ring-2 focus:ring-cyan-500 border border-gray-700"></textarea>
-            <div class="flex justify-end space-x-6 mt-8">
-                <button id="cancel-commitment-btn" class="px-8 py-3 bg-gray-600 hover:bg-gray-700 rounded-lg transition-colors shadow-lg">Cancel</button>
-                <button id="confirm-commitment-btn" class="px-8 py-3 bg-green-600 hover:bg-green-700 rounded-lg transition-colors disabled:bg-gray-700 disabled:cursor-not-allowed shadow-lg" disabled>Confirm</button>
+    <!-- ====================================================
+         SCHEDULE RULE EDITOR MODAL
+         ==================================================== -->
+    <div id="schedule-modal" class="hidden">
+        <div id="schedule-modal-content"
+             style="background: var(--panel); border: 1px solid var(--line);
+                    border-radius: 10px; padding: 24px; max-width: 480px; width: 90%;">
+            <h2 class="font-semibold mb-3" style="font-size: 15px;" id="schedule-modal-title">New scheduled session</h2>
+
+            <div class="mb-4">
+                <label class="label block mb-1">Name</label>
+                <input type="text" id="schedule-modal-name" placeholder="e.g. Morning focus"
+                       class="w-full" maxlength="60">
+            </div>
+
+            <div class="mb-4">
+                <label class="label block mb-2">Days of week</label>
+                <div id="schedule-modal-days" class="flex gap-1.5">
+                    <!-- 7 day-toggles injected by renderer -->
+                </div>
+                <div class="flex gap-2 mt-2 num" style="font-size: 11px;">
+                    <button type="button" id="schedule-modal-days-weekdays" class="btn btn-ghost" style="padding:2px 8px; font-size:11px;">Weekdays</button>
+                    <button type="button" id="schedule-modal-days-weekends" class="btn btn-ghost" style="padding:2px 8px; font-size:11px;">Weekends</button>
+                    <button type="button" id="schedule-modal-days-everyday" class="btn btn-ghost" style="padding:2px 8px; font-size:11px;">Every day</button>
+                    <button type="button" id="schedule-modal-days-clear" class="btn btn-ghost" style="padding:2px 8px; font-size:11px;">Clear</button>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-3 mb-4">
+                <div>
+                    <label class="label block mb-1">Start time</label>
+                    <input type="time" id="schedule-modal-start" value="09:00" class="w-full num">
+                </div>
+                <div>
+                    <label class="label block mb-1">Duration</label>
+                    <div class="grid grid-cols-2 gap-2">
+                        <input type="number" id="schedule-modal-hours" min="0" max="8" value="1" class="text-center num">
+                        <input type="number" id="schedule-modal-minutes" min="0" max="59" value="0" step="5" class="text-center num">
+                    </div>
+                    <div class="grid grid-cols-2 gap-2 mt-1">
+                        <span class="label text-center">hrs</span>
+                        <span class="label text-center">min</span>
+                    </div>
+                </div>
+            </div>
+
+            <div id="schedule-modal-error" class="hidden mb-3"
+                 style="color: var(--bad); font-size: 12px;"></div>
+
+            <div class="flex justify-between items-center">
+                <button id="schedule-modal-delete-btn" class="btn btn-ghost hidden" style="color: var(--bad);">Delete rule</button>
+                <div class="flex gap-2 ml-auto">
+                    <button id="schedule-modal-cancel" class="btn">Cancel</button>
+                    <button id="schedule-modal-save" class="btn btn-primary">Save</button>
+                </div>
             </div>
         </div>
     </div>
 
-    <style>
-        .tab-btn { @apply whitespace-nowrap py-5 px-2 border-b-2 font-medium text-xl transition-all duration-200; }
-        .tab-active { @apply border-cyan-400 text-cyan-300 font-semibold; }
-        .tab-inactive { @apply border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-400 hover:bg-gray-800/30 rounded-t-lg; }
-        .toggle-bg{background-color:#4A5568}.toggle-dot{background-color:white;transform:translateX(0);transition:transform .3s ease-in-out,background-color .3s ease-in-out}input:checked~.toggle-bg{background-color:#D32F2F}input:checked~.toggle-dot{transform:translateX(1.5rem);background-color:#F87171}input:not(:checked)~.toggle-bg{background-color:#22C55E}input:not(:checked)~.toggle-dot{background-color:#86EFAC}input:disabled~.toggle-bg{background-color:#374151;cursor:not-allowed}input:disabled~.toggle-dot{background-color:#6B7280}
-        #commitment-modal.hidden { display: none; }
-        #commitment-modal:not(.hidden) #modal-content { transform: scale(1); opacity: 1; }
-    </style>
+    <!-- ====================================================
+         COMMITMENT MODAL
+         ==================================================== -->
+    <div id="commitment-modal" class="hidden">
+        <div id="modal-content">
+            <div class="flex items-center justify-between mb-3">
+                <h2 class="font-semibold" style="font-size: 16px; color: var(--warn);">Commitment required</h2>
+                <span id="commitment-tier-badge"
+                      class="num"
+                      style="font-size: 11px; padding: 3px 10px; border-radius: 999px;
+                             background: var(--bg-2); border: 1px solid var(--line);
+                             color: var(--ink-2);">
+                </span>
+            </div>
+            <p id="commitment-context"
+               style="color: var(--ink-2); font-size: 13px;" class="mb-4">
+                To proceed, type the following exactly. The backspace key is disabled.
+            </p>
+
+            <!-- Cooldown overlay: shown when tier >= 4. Input stays disabled until 0. -->
+            <div id="commitment-cooldown-row" class="hidden mb-3 flex items-center gap-3"
+                 style="padding: 10px 14px; background: var(--bg-2);
+                        border: 1px solid var(--warn); border-radius: 6px;">
+                <div style="width: 28px; height: 28px; border-radius: 50%;
+                            border: 2px solid var(--warn); display: flex;
+                            align-items: center; justify-content: center;
+                            color: var(--warn); font-weight: 700; font-size: 11px;"
+                     class="num">
+                    <span id="commitment-cooldown-seconds">--</span>
+                </div>
+                <div style="flex: 1;">
+                    <div style="color: var(--warn); font-size: 13px; font-weight: 600;">Pause</div>
+                    <div style="color: var(--ink-3); font-size: 11px;" id="commitment-cooldown-hint">
+                        Sit with this for a moment before you can type.
+                    </div>
+                </div>
+            </div>
+
+            <!-- user-select:none combined with the paste/drop/cut/contextmenu
+                 blocks in renderer.js closes the trivial copy-paste loophole.
+                 A determined user can still inspect the DOM, but the goal is to
+                 interrupt the impulse, not to win an arms race. -->
+            <p id="commitment-paragraph"
+               class="panel-2 p-4 mb-4 italic"
+               style="color: var(--ink-2); font-size: 13px; line-height: 1.55;
+                      user-select: none; -webkit-user-select: none;
+                      -moz-user-select: none; -ms-user-select: none;">
+                <!-- Required-text portion populated by renderer; rest of paragraph faded -->
+            </p>
+            <textarea id="commitment-input" rows="6" class="w-full mb-4"
+                      style="font-family: inherit; line-height: 1.55;"></textarea>
+            <div class="flex justify-end gap-2">
+                <button id="cancel-commitment-btn" class="btn">Cancel</button>
+                <button id="confirm-commitment-btn" class="btn btn-primary" disabled>Confirm</button>
+            </div>
+        </div>
+    </div>
 
     <script src="renderer.js"></script>
 </body>
 </html>
-

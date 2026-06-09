@@ -1,0 +1,11 @@
+Screenshot filename,Shown date,Date,Day,List order,App,Minutes,Display duration,Metric label,Notes,Batch
+test-001.png,"Mon, Jan 5",2026-01-05,Mon,1,YouTube,90,"1 hr, 30 min",Screen time minutes,Synthetic,Test batch
+test-001.png,"Mon, Jan 5",2026-01-05,Mon,2,Instagram,45,45 minutes,Screen time minutes,Synthetic,Test batch
+test-001.png,"Mon, Jan 5",2026-01-05,Mon,3,Chrome,30,30 minutes,Screen time minutes,Synthetic,Test batch
+test-001.png,"Mon, Jan 5",2026-01-05,Mon,4,google.com,5,5 minutes,Chrome sub-site,Synthetic,Test batch
+test-001.png,"Mon, Jan 5",2026-01-05,Mon,5,example.org,2,2 minutes,Chrome sub-site,Synthetic,Test batch
+test-002.png,"Tue, Jan 6",2026-01-06,Tue,1,YouTube,180,"3 hr, 0 min",Screen time minutes,Synthetic,Test batch
+test-002.png,"Tue, Jan 6",2026-01-06,Tue,2,Reddit,60,"1 hr, 0 min",Screen time minutes,Synthetic,Test batch
+test-002.png,"Tue, Jan 6",2026-01-06,Tue,3,WhatsApp,30,30 minutes,Screen time minutes,Synthetic,Test batch
+test-003.png,"Wed, Jan 7",2026-01-07,Wed,1,Instagram,80,"1 hr, 20 min",Screen time minutes,Synthetic,Test batch
+test-003.png,"Wed, Jan 7",2026-01-07,Wed,2,LinkedIn,40,40 minutes,Screen time minutes,Synthetic,Test batch

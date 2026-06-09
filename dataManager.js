@@ -47,16 +47,22 @@ class DataManager {
                     'www.x.com'
                 ],
                 // IMPORTANT: Do NOT include a bare "x" keyword. It will match almost anything.
-                keywords: ['twitter', 'twitter.com', 'x.com'],
+                // Also do NOT include "x.com" as a keyword — the keyword fallback uses
+                // substring matching, which would re-introduce the "netflix.com" false positive.
+                keywords: ['twitter', 'twitter.com'],
+                // Patterns must distinguish *being on X* from *discussing X elsewhere*.
+                // Anchor on title structures that only X.com produces, never a bare
+                // `\bx\.com\b` (matches "How to delete your x.com account" on Reddit).
                 matchPatterns: [
                     // Old brand
                     '\\btwitter\\b',
                     '\\btwitter\\.com\\b',
-                    // Domain
-                    '\\bx\\.com\\b',
-                    // New site titles often look like: "Notifications / X" or "Home / X"
+                    // Modern X.com title formats: "Home / X", "Notifications / X", "(3) Home / X"
                     '\\s/\\sx\\s',
-                    '\\s-\\sx\\s'
+                    '\\s-\\sx\\s',
+                    '\\s/\\sx$',
+                    // Tweet author titles: 'Joe Kagumba on X: "..."'  / 'Foo on X / X'
+                    '\\bon\\sx[:\\s]'
                 ],
                 limit: 60
             },
@@ -65,7 +71,9 @@ class DataManager {
                 // Subdomains matter for hosts-file blocking.
                 domains: ['reddit.com', 'www.reddit.com', 'old.reddit.com', 'new.reddit.com', 'np.reddit.com', 'redd.it'],
                 keywords: ['reddit', 'reddit.com', 'redd.it'],
-                matchPatterns: ['\\breddit\\b', '\\breddit\\.com\\b', '\\bredd\\.it\\b'],
+                // r/<subreddit> pattern catches modern Reddit titles like
+                // "AMA with Linus Torvalds : r/programming" — the dominant title format now.
+                matchPatterns: ['\\breddit\\b', '\\breddit\\.com\\b', '\\bredd\\.it\\b', '\\br/[A-Za-z0-9_]+\\b'],
                 limit: 60
             },
             'LinkedIn': {
@@ -224,6 +232,61 @@ class DataManager {
             this.store.set(`usage.${today}`, {});
         }
 
+        // When true (default): unblocked sites are automatically re-blocked at the local calendar rollover.
+        if (!this.store.has('autoReblockUnblockedSitesOnNewDay')) {
+            this.store.set('autoReblockUnblockedSitesOnNewDay', true);
+        }
+
+        // Last calendar day we've applied "new day" policy (baseline for midnight detection).
+        if (!this.store.has('calendarRollBaselineDay')) {
+            this.store.set('calendarRollBaselineDay', today);
+        }
+
+        if (!this.store.has('hostsTamperEvents')) {
+            this.store.set('hostsTamperEvents', []);
+        }
+
+        // Local-HTML digest settings. Default target is the user's Google Drive root
+        // — created lazily on first generate. Schedule is opportunistic, not exact:
+        // weekly runs the first time the app sees a Monday >= 09:00 with no prior run that week;
+        // monthly runs the first time it sees day-of-month 1 >= 09:00 with no prior run that month.
+        if (!this.store.has('reportSettings')) {
+            this.store.set('reportSettings', {
+                targetFolder: 'G:\\My Drive\\Social Blocker\\reports',
+                weeklyEnabled: true,
+                monthlyEnabled: true,
+                autoOpenOnGenerate: true,
+                lastWeeklyGeneratedAt: null,
+                lastMonthlyGeneratedAt: null
+            });
+        }
+
+        // HUD widget settings. visible=false default — opt-in via tray menu (per Recommendation #2).
+        // autoHideFullscreen=true to disappear during video/games. clickThrough=false so
+        // double-click opens the dashboard.
+        if (!this.store.has('hudConfig')) {
+            this.store.set('hudConfig', {
+                visible: false,
+                autoHideFullscreen: true,
+                clickThrough: false
+            });
+        }
+
+        // Deep Work editor configuration. selectedSites references siteSettings keys
+        // (Instagram, Facebook, etc.) plus the special name 'Messenger' which resolves
+        // to a hardcoded domain set via getDeepWorkSpecialSites(). customDomains is a
+        // free-form list users add via chip input in the dashboard.
+        if (!this.store.has('deepWorkConfig')) {
+            this.store.set('deepWorkConfig', {
+                selectedSites: ['Instagram', 'Facebook', 'Twitter/X', 'Reddit', 'YouTube', 'Messenger'],
+                customDomains: []
+            });
+        }
+
+        // Mirrors which sites should be blocking all their domains according to last successful hosts apply / policy.
+        if (!this.store.has('appliedBlockedBySite')) {
+            this.syncAppliedBlockedFromDomains(this.getBlockedDomains());
+        }
 
         // Manual "Lock Today" per-site discipline control (strict: no unlock until tomorrow)
         if (!this.store.has('manualLocks')) {
@@ -327,6 +390,9 @@ class DataManager {
 
     setBlockedDomains(domains) {
         this.store.set('blockedDomains', domains);
+        // Keep appliedBlockedBySite in sync with the canonical domain list so the
+        // calendar-roll logic and renderer never see contradictory state.
+        this.syncAppliedBlockedFromDomains(domains);
     }
 
     // Usage Data
@@ -460,6 +526,83 @@ class DataManager {
         return { success: true };
     }
 
+    /**
+     * Total unblock events logged today across all sites. Used by the
+     * progressive friction policy: the more you've already caved today,
+     * the more onerous the next commitment becomes.
+     */
+    getTodayUnblockTotal() {
+        // Timestamps are stored as UTC ISO strings (new Date().toISOString()),
+        // but "today" must be evaluated in the user's LOCAL timezone — otherwise
+        // events created between local-midnight and UTC-midnight (e.g. 8pm EDT
+        // for a UTC-4 user) get tagged with tomorrow's UTC prefix and silently
+        // drop out of the count. Convert each timestamp back to a local date
+        // for the comparison.
+        const today = this.getLocalISODate();
+        return this.getUnblockHistory().filter(e => {
+            if (typeof e?.timestamp !== 'string') return false;
+            const d = new Date(e.timestamp);
+            if (isNaN(d.getTime())) return false;
+            return this.getLocalISODate(d) === today;
+        }).length;
+    }
+
+    // ---------------- Progressive Friction ----------------
+    // Pure, testable policy: given the number of unblock events ALREADY
+    // logged today (priorCount), return what the next commitment should
+    // require. Behavioural design: the marginal cost of each subsequent
+    // unblock should rise steeply enough to make impulse defections
+    // expensive, but not so steeply that the user gives up and disables
+    // the whole product.
+
+    static computeFrictionPolicy(priorCount, options = {}) {
+        const enabled = options.enabled !== false;
+        const totalSentences = Math.max(1, Number(options.totalSentences) || 5);
+
+        // Disabled: legacy behaviour — full paragraph, no cooldown.
+        if (!enabled) {
+            return { tier: 0, sentenceCount: totalSentences, cooldownSeconds: 0 };
+        }
+
+        // Ladder: 1 -> 2 -> 3 -> 4 (+15s) -> full (+60s).
+        if (priorCount <= 0) return { tier: 1, sentenceCount: 1, cooldownSeconds: 0 };
+        if (priorCount === 1) return { tier: 2, sentenceCount: 2, cooldownSeconds: 0 };
+        if (priorCount === 2) return { tier: 3, sentenceCount: 3, cooldownSeconds: 0 };
+        if (priorCount === 3) return { tier: 4, sentenceCount: 4, cooldownSeconds: 15 };
+        return { tier: 5, sentenceCount: totalSentences, cooldownSeconds: 60 };
+    }
+
+    /**
+     * Return the first N sentences of `text`. Sentence boundary = '.', '!' or
+     * '?' followed by whitespace/end. If the source has fewer sentences than
+     * requested (or we can't split cleanly), return the whole text — we'd
+     * rather over-require than silently under-require.
+     */
+    static extractFirstNSentences(text, n) {
+        if (typeof text !== 'string') return '';
+        const N = Math.max(1, Math.floor(Number(n) || 1));
+        // Split keeping trailing punctuation+whitespace as the delimiter.
+        const matches = text.match(/[^.!?]+[.!?]+(?:\s+|$)/g);
+        if (!matches || matches.length === 0) return text;
+        if (matches.length <= N) return text;
+        return matches.slice(0, N).join('').trimEnd();
+    }
+
+    // Progressive friction config. Defaults to enabled=true; user can
+    // disable from Settings if they find the escalation excessive.
+    getProgressiveFrictionConfig() {
+        const raw = this.store.get('progressiveFrictionConfig', null);
+        return {
+            enabled: raw === null ? true : !!raw.enabled
+        };
+    }
+
+    setProgressiveFrictionConfig(partial) {
+        const next = { ...this.getProgressiveFrictionConfig(), ...(partial || {}) };
+        this.store.set('progressiveFrictionConfig', next);
+        return next;
+    }
+
     getTodayUnblocks() {
         const today = this.getLocalISODate();
         const history = this.getUnblockHistory();
@@ -480,6 +623,157 @@ class DataManager {
         });
         
         return todayUnblocks;
+    }
+
+    // ---------------- Insights ----------------
+    //
+    // Pragmatic, opinionated read-only helpers for the Insights tab.
+    // All return-shape-stable; missing data degrades to zeros, not crashes.
+
+    _isoDateForOffset(offsetFromToday = 0, anchor = new Date()) {
+        const d = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate());
+        d.setDate(d.getDate() + offsetFromToday);
+        return this.getLocalISODate(d);
+    }
+
+    /** Total social seconds for a single ISO date across ALL tracked sites. */
+    getDailyTotalSocialSeconds(isoDate) {
+        const usage = this.store.get(`usage.${isoDate}`, {});
+        let total = 0;
+        for (const k of Object.keys(usage)) {
+            const v = Number(usage[k]);
+            if (Number.isFinite(v)) total += v;
+        }
+        return total;
+    }
+
+    /**
+     * Find the hour (0-23) with the highest social usage on `isoDate` and
+     * return both the hour and its seconds. If no usage exists, return
+     * { hour: null, seconds: 0 }.
+     */
+    getMostDistractingHourForDay(isoDate) {
+        const allSiteSettings = this.getSiteSettings();
+        const totals = new Array(24).fill(0);
+        for (let hour = 0; hour < 24; hour++) {
+            for (const siteName in allSiteSettings) {
+                const v = Number(this.store.get(`hourlyUsage.${isoDate}.${siteName}.${hour}`, 0));
+                if (Number.isFinite(v)) totals[hour] += v;
+            }
+        }
+        let bestHour = null;
+        let bestSeconds = 0;
+        for (let h = 0; h < 24; h++) {
+            if (totals[h] > bestSeconds) { bestSeconds = totals[h]; bestHour = h; }
+        }
+        return { hour: bestHour, seconds: bestSeconds, hourlyTotals: totals };
+    }
+
+    /**
+     * Return per-day totals for the week containing (today + 7*weekOffset).
+     * weekOffset=0 -> current week (Mon..Sun), -1 -> last week, etc.
+     * Returns [{ date, dayOfWeek, seconds }] with exactly 7 entries.
+     */
+    getWeekTotals(weekOffset = 0, anchor = new Date()) {
+        // Find Monday of the target week using ISO weekday (1=Mon..7=Sun).
+        const a = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate());
+        const isoDow = (a.getDay() + 6) % 7; // 0=Mon..6=Sun
+        a.setDate(a.getDate() - isoDow + (weekOffset * 7));
+        const days = [];
+        for (let i = 0; i < 7; i++) {
+            const d = new Date(a.getFullYear(), a.getMonth(), a.getDate() + i);
+            const iso = this.getLocalISODate(d);
+            days.push({
+                date: iso,
+                dayOfWeek: i, // 0=Mon..6=Sun (ISO ordering)
+                seconds: this.getDailyTotalSocialSeconds(iso)
+            });
+        }
+        return days;
+    }
+
+    /**
+     * Chronological list of today's unblock events with their tier
+     * computed retroactively. The Nth unblock of the day gets tier = N.
+     * Returns [{ timestamp, siteName, tier, sentenceCount, cooldownSeconds }].
+     * Honors the progressive-friction config (when disabled, tier=0 for all).
+     */
+    getTodayFrictionTimeline() {
+        // See getTodayUnblockTotal: timestamps are UTC ISO strings, but "today"
+        // must be evaluated in local time so evening-EDT events aren't
+        // misattributed to tomorrow.
+        const today = this.getLocalISODate();
+        const history = this.getUnblockHistory()
+            .filter(e => {
+                if (typeof e?.timestamp !== 'string') return false;
+                const d = new Date(e.timestamp);
+                if (isNaN(d.getTime())) return false;
+                return this.getLocalISODate(d) === today;
+            })
+            .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+        const cfg = this.getProgressiveFrictionConfig();
+        const DataManager = this.constructor;
+        return history.map((e, idx) => {
+            const policy = DataManager.computeFrictionPolicy(idx, { enabled: cfg.enabled });
+            return {
+                timestamp: e.timestamp,
+                siteName: e.siteName,
+                tier: policy.tier,
+                sentenceCount: policy.sentenceCount,
+                cooldownSeconds: policy.cooldownSeconds
+            };
+        });
+    }
+
+    /**
+     * High-level aggregator the renderer calls once. Keeps the renderer
+     * dumb (just renders what's here) and the main-process math centralized.
+     */
+    buildInsightsPayload(now = new Date()) {
+        const todayIso = this.getLocalISODate(now);
+        const todaySeconds = this.getDailyTotalSocialSeconds(todayIso);
+        const hour = this.getMostDistractingHourForDay(todayIso);
+        const thisWeek = this.getWeekTotals(0, now);
+        const lastWeek = this.getWeekTotals(-1, now);
+        const timeline = this.getTodayFrictionTimeline();
+        const todayUsageMap = this.store.get(`usage.${todayIso}`, {});
+
+        const thisWeekTotal = thisWeek.reduce((s, d) => s + d.seconds, 0);
+        const lastWeekTotal = lastWeek.reduce((s, d) => s + d.seconds, 0);
+        // Best/worst days for the week so far (only counting days with usage).
+        const usedDays = thisWeek.filter(d => d.seconds > 0);
+        const bestDay = usedDays.length
+            ? usedDays.reduce((min, d) => d.seconds < min.seconds ? d : min, usedDays[0])
+            : null;
+
+        // Top site today (for context on "what's eating my day").
+        let topSite = null;
+        for (const site of Object.keys(todayUsageMap)) {
+            const s = Number(todayUsageMap[site]) || 0;
+            if (s > 0 && (!topSite || s > topSite.seconds)) {
+                topSite = { siteName: site, seconds: s };
+            }
+        }
+
+        return {
+            today: {
+                date: todayIso,
+                totalSeconds: todaySeconds,
+                topSite,
+                unblockCount: timeline.length,
+                highestTier: timeline.reduce((m, t) => Math.max(m, t.tier), 0),
+                mostDistractingHour: hour
+            },
+            week: {
+                thisWeek,
+                lastWeek,
+                thisWeekTotal,
+                lastWeekTotal,
+                deltaSeconds: thisWeekTotal - lastWeekTotal,
+                bestDay
+            },
+            timeline
+        };
     }
 
     // Heat Map Data
@@ -593,16 +887,712 @@ class DataManager {
     }
 
     // Initial Data for Renderer
-    getInitialData() {
+    getInitialData(hostsIntegrityOverlay = {}) {
         return {
             success: true,
             today: this.getLocalISODate(),
             siteSettings: this.getSiteSettings(),
             blockedDomains: this.getBlockedDomains(),
             usageData: this.getTodayUsage(),
-            deepWork: this.getDeepWork(),
-            manualLocks: this.getManualLocks()
+            deepWork: this.normalizeDeepWork(this.getDeepWork()),
+            rawDeepWork: this.getDeepWork(),
+            manualLocks: this.getManualLocks(),
+            autoReblockUnblockedSitesOnNewDay: this.store.get('autoReblockUnblockedSitesOnNewDay', true),
+            reportSettings: this.getReportSettings(),
+            deepWorkConfig: this.getDeepWorkConfig(),
+            deepWorkSpecialSites: this.getDeepWorkSpecialSites(),
+            deepWorkSchedule: this.getDeepWorkSchedule(),
+            progressiveFrictionConfig: this.getProgressiveFrictionConfig(),
+            phoneStatus: this.getPhoneStatus(),
+            ...hostsIntegrityOverlay
         };
+    }
+
+    // ============================================================
+    // Phone usage data (v1.7.0)
+    // ------------------------------------------------------------
+    // Pluggable: the store doesn't care which source produced the
+    // records (CSV folder import today; ADB/StayFree feeders later).
+    // Schema: store.phoneUsage = {
+    //     source: 'csv-folder-import' | 'adb-pull' | 'stayfree-export',
+    //     sourceLabel: human-readable string for UI,
+    //     lastImportedAt: ISO string,
+    //     lastImportFolder: string | null,
+    //     days: { 'YYYY-MM-DD': PhoneDayRecord, ... }
+    // }
+    //
+    // A PhoneDayRecord is exactly the shape phoneCsvParser.parseFolder()
+    // returns inside payload.days[date]. Keeping these symmetric means
+    // future feeders only need to populate the same record shape — they
+    // don't need to know how the store works.
+    // ============================================================
+
+    getPhoneUsage() {
+        const defaults = {
+            source: null,
+            sourceLabel: null,
+            lastImportedAt: null,
+            lastImportFolder: null,
+            days: {},
+        };
+        const stored = this.store.get('phoneUsage', defaults) || {};
+        // Defensive normalization in case stored shape is partial.
+        return {
+            ...defaults,
+            ...stored,
+            days: stored.days && typeof stored.days === 'object' ? stored.days : {},
+        };
+    }
+
+    /**
+     * Lightweight summary for the renderer + Insights tab. Doesn't include
+     * the full per-day data — that lives in getPhoneUsage().
+     */
+    getPhoneStatus() {
+        const pu = this.getPhoneUsage();
+        const dates = Object.keys(pu.days).sort();
+        const newestDate = dates.length ? dates[dates.length - 1] : null;
+        const oldestDate = dates.length ? dates[0] : null;
+        return {
+            hasData: dates.length > 0,
+            source: pu.source,
+            sourceLabel: pu.sourceLabel,
+            lastImportedAt: pu.lastImportedAt,
+            lastImportFolder: pu.lastImportFolder,
+            daysCount: dates.length,
+            newestDate,
+            oldestDate,
+        };
+    }
+
+    /**
+     * Merge an import payload (from phoneCsvParser.parseFolder or any future
+     * feeder with the same shape) into the store. New days overwrite old
+     * days for the same date — this is intentional so re-importing after a
+     * data correction Just Works.
+     *
+     * @param {object} payload  Must include { source, sourceLabel, days, sourceFolder? }
+     * @returns {object} { daysImported, daysReplaced, totalDays, warnings }
+     */
+    importPhoneUsage(payload) {
+        if (!payload || typeof payload !== 'object' || !payload.days) {
+            throw new Error('importPhoneUsage: payload missing required "days" map');
+        }
+        const current = this.getPhoneUsage();
+        const before = new Set(Object.keys(current.days));
+        const incoming = Object.keys(payload.days);
+
+        let daysImported = 0;
+        let daysReplaced = 0;
+        for (const iso of incoming) {
+            if (before.has(iso)) daysReplaced += 1;
+            else daysImported += 1;
+            current.days[iso] = payload.days[iso];
+        }
+
+        current.source = payload.source || 'unknown';
+        current.sourceLabel = payload.sourceLabel || payload.source || 'Phone import';
+        current.lastImportedAt = payload.importedAt || new Date().toISOString();
+        if (payload.sourceFolder) current.lastImportFolder = payload.sourceFolder;
+
+        this.store.set('phoneUsage', current);
+
+        return {
+            daysImported,
+            daysReplaced,
+            totalDays: Object.keys(current.days).length,
+            warnings: Array.isArray(payload.warnings) ? payload.warnings : [],
+        };
+    }
+
+    clearPhoneUsage() {
+        this.store.set('phoneUsage', {
+            source: null,
+            sourceLabel: null,
+            lastImportedAt: null,
+            lastImportFolder: null,
+            days: {},
+        });
+        return { cleared: true };
+    }
+
+    // ----- Pure phone read helpers (mirror desktop helpers) -----
+    getPhoneDailyTotalMinutes(date) {
+        const r = this.getPhoneUsage().days[date];
+        return r && typeof r.totalMinutes === 'number' ? r.totalMinutes : 0;
+    }
+    getPhoneDailyUnlocks(date) {
+        const r = this.getPhoneUsage().days[date];
+        return r && typeof r.unlocks === 'number' ? r.unlocks : 0;
+    }
+    /**
+     * Returns the canonical app name with the highest minutes for the given
+     * date, or null if no data. Used by Insights "Top phone app today".
+     */
+    getPhoneTopAppForDay(date) {
+        const r = this.getPhoneUsage().days[date];
+        if (!r || !r.perApp) return null;
+        let best = null;
+        let bestMin = -1;
+        for (const [app, min] of Object.entries(r.perApp)) {
+            if (typeof min === 'number' && min > bestMin) { best = app; bestMin = min; }
+        }
+        return best ? { app: best, minutes: bestMin } : null;
+    }
+    /**
+     * Highest-opens-count app for the day. Separate from screen-time top
+     * app because the two often disagree (Messages opens 100+ times but
+     * each session is brief).
+     */
+    getPhoneTopOpenedAppForDay(date) {
+        const r = this.getPhoneUsage().days[date];
+        if (!r || !r.perAppOpens) return null;
+        let best = null;
+        let bestOpens = -1;
+        for (const [app, opens] of Object.entries(r.perAppOpens)) {
+            if (typeof opens === 'number' && opens > bestOpens) { best = app; bestOpens = opens; }
+        }
+        return best ? { app: best, opens: bestOpens } : null;
+    }
+    /**
+     * Mirror getWeekTotals() for phone data. Returns 7-element array of
+     * { date, dayOfWeek, totalMinutes, unlocks } objects ending today
+     * (weekOffset=0) or `weekOffset` weeks back.
+     */
+    getPhoneWeekTotals(weekOffset = 0) {
+        const todayIso = this.getLocalISODate();
+        const today = new Date(todayIso + 'T12:00:00');
+        const start = new Date(today);
+        start.setDate(start.getDate() - 6 - (weekOffset * 7));
+        const usage = this.getPhoneUsage();
+        const days = [];
+        for (let i = 0; i < 7; i++) {
+            const d = new Date(start);
+            d.setDate(start.getDate() + i);
+            const iso = this._dateToIso(d);
+            const rec = usage.days[iso];
+            days.push({
+                date: iso,
+                dayOfWeek: d.getDay(),
+                totalMinutes: rec && typeof rec.totalMinutes === 'number' ? rec.totalMinutes : 0,
+                unlocks: rec && typeof rec.unlocks === 'number' ? rec.unlocks : 0,
+                hasData: !!rec,
+            });
+        }
+        return days;
+    }
+
+    _dateToIso(d) {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const da = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${da}`;
+    }
+
+    // ============================================================
+    // Phone export reminder (v1.8.0)
+    // ------------------------------------------------------------
+    // Until ADB live-sync exists, the user manually exports StayFree
+    // weekly. This config + the main-process scheduler fire a desktop
+    // notification at a chosen day-of-week + hour so they don't forget.
+    //
+    // Schema: { enabled, dayOfWeek (0=Sun..6=Sat), hour (0-23), lastFiredOn (ISO date) }
+    // ============================================================
+
+    getPhoneReminderConfig() {
+        const defaults = { enabled: false, dayOfWeek: 0, hour: 20, lastFiredOn: null }; // default Sun 8pm if enabled
+        const stored = this.store.get('phoneExportReminder', defaults) || {};
+        return { ...defaults, ...stored };
+    }
+
+    setPhoneReminderConfig(partial) {
+        const next = { ...this.getPhoneReminderConfig(), ...(partial || {}) };
+        // Coerce sane ranges so a corrupt config can't poison the scheduler.
+        next.dayOfWeek = Math.max(0, Math.min(6, parseInt(next.dayOfWeek, 10) || 0));
+        next.hour = Math.max(0, Math.min(23, parseInt(next.hour, 10) || 0));
+        next.enabled = !!next.enabled;
+        this.store.set('phoneExportReminder', next);
+        return next;
+    }
+
+    /**
+     * Should the reminder fire RIGHT NOW (called from main.js scheduler tick)?
+     * Returns true exactly once per scheduled day-of-week, after the configured
+     * hour, regardless of how many times the tick runs in that window.
+     * Use markPhoneReminderFired() after firing to update lastFiredOn.
+     */
+    shouldFirePhoneReminderNow(now = new Date()) {
+        const cfg = this.getPhoneReminderConfig();
+        if (!cfg.enabled) return false;
+        if (now.getDay() !== cfg.dayOfWeek) return false;
+        if (now.getHours() < cfg.hour) return false;
+        const todayIso = this._dateToIso(now);
+        if (cfg.lastFiredOn === todayIso) return false; // already fired today
+        return true;
+    }
+
+    markPhoneReminderFired(now = new Date()) {
+        const cfg = this.getPhoneReminderConfig();
+        cfg.lastFiredOn = this._dateToIso(now);
+        this.store.set('phoneExportReminder', cfg);
+    }
+
+    // ---------------- HUD widget configuration ----------------
+    getHudConfig() {
+        const defaults = { visible: false, autoHideFullscreen: true, clickThrough: false };
+        const stored = this.store.get('hudConfig', defaults) || {};
+        return { ...defaults, ...stored };
+    }
+
+    setHudConfig(partial) {
+        const next = { ...this.getHudConfig(), ...(partial || {}) };
+        this.store.set('hudConfig', next);
+        return next;
+    }
+
+    // ---------------- Deep Work editor configuration ----------------
+
+    /**
+     * Pseudo-sites available in the Deep Work editor that are NOT in the normal
+     * tracker site list (because they're not browser-based or not configurable).
+     * Add new entries here to make them selectable in the editor.
+     */
+    getDeepWorkSpecialSites() {
+        return {
+            Messenger: {
+                domains: ['web.whatsapp.com', 'messenger.com', 'www.messenger.com']
+            }
+        };
+    }
+
+    getDeepWorkConfig() {
+        const defaults = {
+            selectedSites: ['Instagram', 'Facebook', 'Twitter/X', 'Reddit', 'YouTube', 'Messenger'],
+            customDomains: []
+        };
+        const stored = this.store.get('deepWorkConfig', defaults) || {};
+        return {
+            ...defaults,
+            ...stored,
+            selectedSites: Array.isArray(stored.selectedSites) ? stored.selectedSites : defaults.selectedSites,
+            customDomains: Array.isArray(stored.customDomains) ? stored.customDomains : []
+        };
+    }
+
+    setDeepWorkConfig(partial) {
+        const next = { ...this.getDeepWorkConfig(), ...(partial || {}) };
+        // Normalize custom domains (lowercase, trim, strip protocol/path, dedupe).
+        if (Array.isArray(next.customDomains)) {
+            const cleaned = next.customDomains
+                .map(d => String(d || '').trim().toLowerCase())
+                .map(d => d.replace(/^https?:\/\//, '').replace(/\/.*$/, ''))
+                .filter(d => d && /^[a-z0-9.-]+\.[a-z]{2,}$/.test(d));
+            next.customDomains = Array.from(new Set(cleaned));
+        }
+        if (Array.isArray(next.selectedSites)) {
+            next.selectedSites = Array.from(new Set(next.selectedSites.filter(Boolean)));
+        }
+        this.store.set('deepWorkConfig', next);
+        return next;
+    }
+
+    /**
+     * Compute the full set of domains to block when a Deep Work session is active.
+     * Combines: selected real-site domains (from siteSettings) + selected special sites
+     * (Messenger etc.) + user-added customDomains. Always lowercase, always deduped.
+     */
+    computeDeepWorkDomains() {
+        const config = this.getDeepWorkConfig();
+        const siteSettings = this.getSiteSettings();
+        const specials = this.getDeepWorkSpecialSites();
+        const out = new Set();
+        for (const name of config.selectedSites) {
+            if (specials[name] && Array.isArray(specials[name].domains)) {
+                specials[name].domains.forEach(d => out.add(String(d).toLowerCase()));
+            } else if (siteSettings[name] && Array.isArray(siteSettings[name].domains)) {
+                siteSettings[name].domains.forEach(d => out.add(String(d).toLowerCase()));
+            }
+        }
+        for (const d of config.customDomains) {
+            const v = String(d || '').trim().toLowerCase();
+            if (v) out.add(v);
+        }
+        return Array.from(out);
+    }
+
+    // ---------------- Report (digest) settings ----------------
+    getReportSettings() {
+        const defaults = {
+            targetFolder: 'G:\\My Drive\\Social Blocker\\reports',
+            weeklyEnabled: true,
+            monthlyEnabled: true,
+            autoOpenOnGenerate: true,
+            lastWeeklyGeneratedAt: null,
+            lastMonthlyGeneratedAt: null
+        };
+        const stored = this.store.get('reportSettings', defaults) || {};
+        return { ...defaults, ...stored };
+    }
+
+    setReportSettings(partial) {
+        const next = { ...this.getReportSettings(), ...(partial || {}) };
+        this.store.set('reportSettings', next);
+        return next;
+    }
+
+    // ---------------- Deep Work auto-schedule ----------------
+    //
+    // Rules persist in `store.deepWorkSchedule`. Each rule is:
+    //   { id, enabled, name, days[0..6 Sun..Sat], startTime "HH:MM",
+    //     durationMinutes, lastFiredOn "YYYY-MM-DD" | null }
+    //
+    // Why we store `lastFiredOn` per rule instead of inferring from current
+    // session state: a rule may legitimately want to fire even if a manual
+    // session ended earlier today. The `lastFiredOn` guard prevents the
+    // 30-second evaluator from firing the same rule twice if it stays in the
+    // 5-minute grace window across multiple ticks.
+
+    getDeepWorkSchedule() {
+        const raw = this.store.get('deepWorkSchedule', []);
+        if (!Array.isArray(raw)) return [];
+        // Defensive normalization for older / partial data.
+        return raw
+            .filter(r => r && typeof r === 'object' && r.id)
+            .map(r => ({
+                id: String(r.id),
+                enabled: !!r.enabled,
+                name: String(r.name || 'Untitled'),
+                days: Array.isArray(r.days)
+                    ? Array.from(new Set(r.days.map(d => Number(d)).filter(d => Number.isInteger(d) && d >= 0 && d <= 6))).sort()
+                    : [],
+                startTime: this._normalizeHHMM(r.startTime),
+                durationMinutes: this._clampDuration(r.durationMinutes),
+                lastFiredOn: typeof r.lastFiredOn === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(r.lastFiredOn)
+                    ? r.lastFiredOn
+                    : null
+            }));
+    }
+
+    _normalizeHHMM(s) {
+        if (typeof s !== 'string') return '09:00';
+        const m = s.match(/^(\d{1,2}):(\d{1,2})$/);
+        if (!m) return '09:00';
+        const h = parseInt(m[1], 10);
+        const mm = parseInt(m[2], 10);
+        // Reject (not clamp) out-of-range values. A corrupted "99:99" should
+        // fall back to a known-safe default, not silently fire at 23:59.
+        if (h < 0 || h > 23 || mm < 0 || mm > 59) return '09:00';
+        return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+    }
+
+    _clampDuration(n) {
+        const v = parseInt(n, 10);
+        if (!Number.isFinite(v) || v < 1) return 60;
+        if (v > 480) return 480; // cap matches the manual UI cap (8h)
+        return v;
+    }
+
+    setDeepWorkSchedule(rules) {
+        const list = Array.isArray(rules) ? rules : [];
+        const normalized = list
+            .filter(r => r && typeof r === 'object')
+            .map(r => ({
+                id: r.id ? String(r.id) : this._genId(),
+                enabled: !!r.enabled,
+                name: String(r.name || 'Untitled').slice(0, 60),
+                days: Array.isArray(r.days)
+                    ? Array.from(new Set(r.days.map(d => Number(d)).filter(d => Number.isInteger(d) && d >= 0 && d <= 6))).sort()
+                    : [],
+                startTime: this._normalizeHHMM(r.startTime),
+                durationMinutes: this._clampDuration(r.durationMinutes),
+                lastFiredOn: typeof r.lastFiredOn === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(r.lastFiredOn)
+                    ? r.lastFiredOn
+                    : null
+            }));
+        this.store.set('deepWorkSchedule', normalized);
+        return normalized;
+    }
+
+    _genId() {
+        try {
+            const { randomUUID } = require('crypto');
+            return randomUUID();
+        } catch (_) {
+            return 'r_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+        }
+    }
+
+    /**
+     * Two rules are considered "the same rule" if their semantic fingerprint
+     * matches: name + days set + startTime + durationMinutes. We ignore id,
+     * enabled, and lastFiredOn since none of those change the rule's intent.
+     */
+    static _ruleFingerprint(r) {
+        if (!r) return '';
+        const days = Array.isArray(r.days) ? [...r.days].sort().join(',') : '';
+        return JSON.stringify({
+            name: String(r.name || '').trim(),
+            days,
+            startTime: r.startTime || '',
+            durationMinutes: Number(r.durationMinutes) || 0
+        });
+    }
+
+    addScheduleRule(partial) {
+        const rules = this.getDeepWorkSchedule();
+        const rule = {
+            id: this._genId(),
+            enabled: partial?.enabled !== false,
+            name: partial?.name || 'Untitled',
+            days: partial?.days || [],
+            startTime: partial?.startTime || '09:00',
+            durationMinutes: partial?.durationMinutes || 60,
+            lastFiredOn: null
+        };
+        // Dedup guard: if a rule with the same name+days+startTime+duration
+        // already exists, return the existing list unchanged. Prevents the
+        // "rapid double-click creates two identical rules" failure mode and
+        // also catches users who simply forget they already added it.
+        const fp = DataManager._ruleFingerprint(rule);
+        const existingIdx = rules.findIndex(r => DataManager._ruleFingerprint(r) === fp);
+        if (existingIdx !== -1) {
+            return rules;
+        }
+        rules.push(rule);
+        return this.setDeepWorkSchedule(rules);
+    }
+
+    /**
+     * Returns whether a rule with this exact fingerprint already exists.
+     * Used by the renderer to show a "Rule already exists" message before
+     * the user wastes a click. The IPC handler also checks server-side.
+     */
+    scheduleRuleExists(partial) {
+        const fp = DataManager._ruleFingerprint({
+            name: partial?.name || 'Untitled',
+            days: partial?.days || [],
+            startTime: partial?.startTime || '09:00',
+            durationMinutes: partial?.durationMinutes || 60
+        });
+        return this.getDeepWorkSchedule().some(r => DataManager._ruleFingerprint(r) === fp);
+    }
+
+    /**
+     * Wipe every schedule rule. Used by the "Delete all" bulk-action button.
+     * No undo - this is a deliberately destructive cleanup helper.
+     */
+    clearDeepWorkSchedule() {
+        this.store.set('deepWorkSchedule', []);
+        return [];
+    }
+
+    updateScheduleRule(id, partial) {
+        const rules = this.getDeepWorkSchedule();
+        const idx = rules.findIndex(r => r.id === id);
+        if (idx === -1) return rules;
+        rules[idx] = { ...rules[idx], ...(partial || {}), id }; // id pinned
+        return this.setDeepWorkSchedule(rules);
+    }
+
+    deleteScheduleRule(id) {
+        const rules = this.getDeepWorkSchedule().filter(r => r.id !== id);
+        return this.setDeepWorkSchedule(rules);
+    }
+
+    /**
+     * Mark a rule as having fired today so the 30s evaluator doesn't re-fire
+     * inside the grace window.
+     */
+    markScheduleRuleFired(id, isoDate) {
+        return this.updateScheduleRule(id, { lastFiredOn: isoDate });
+    }
+
+    /**
+     * Decide whether `rule` should fire RIGHT NOW. Pure function (no I/O), so
+     * it's trivially unit-testable.
+     *   - `now` is a Date (caller supplies, for testability)
+     *   - `graceMinutes` is the late-fire allowance (default 5)
+     * Returns true iff: enabled, today's weekday is in rule.days,
+     * now-clock has advanced past startTime, the gap is <= grace,
+     * and lastFiredOn != today.
+     */
+    static shouldFireRuleNow(rule, now = new Date(), graceMinutes = 5) {
+        if (!rule || !rule.enabled) return false;
+        if (!Array.isArray(rule.days) || !rule.days.includes(now.getDay())) return false;
+        const m = (rule.startTime || '').match(/^(\d{2}):(\d{2})$/);
+        if (!m) return false;
+        const schedHour = parseInt(m[1], 10);
+        const schedMin = parseInt(m[2], 10);
+
+        const nowMins = now.getHours() * 60 + now.getMinutes();
+        const schedMins = schedHour * 60 + schedMin;
+        if (nowMins < schedMins) return false;
+        if (nowMins - schedMins > graceMinutes) return false;
+
+        const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+        if (rule.lastFiredOn === today) return false;
+
+        return true;
+    }
+
+    /**
+     * Compute the next fire moment across ALL enabled rules, or null if none
+     * would ever fire. Returns { ruleId, ruleName, fireAt: Date }.
+     * Looks ahead up to 7 days.
+     */
+    static computeNextFireTime(rules, now = new Date()) {
+        if (!Array.isArray(rules)) return null;
+        let best = null;
+        for (const rule of rules) {
+            if (!rule || !rule.enabled || !Array.isArray(rule.days) || rule.days.length === 0) continue;
+            const m = (rule.startTime || '').match(/^(\d{2}):(\d{2})$/);
+            if (!m) continue;
+            const schedHour = parseInt(m[1], 10);
+            const schedMin  = parseInt(m[2], 10);
+
+            // Walk forward day-by-day up to 7 days to find the next match.
+            for (let offset = 0; offset < 8; offset++) {
+                const candidate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset, schedHour, schedMin, 0, 0);
+                if (candidate <= now) continue;
+                if (!rule.days.includes(candidate.getDay())) continue;
+                if (!best || candidate < best.fireAt) {
+                    best = { ruleId: rule.id, ruleName: rule.name, fireAt: candidate };
+                }
+                break; // first hit for this rule is the nearest
+            }
+        }
+        return best;
+    }
+
+    // ---------------- Deep Work helpers (normalization) ----------------
+    /**
+     * Normalize raw stored deepWork data into a renderer-friendly shape, or null when
+     * no active session. Treats `endTime` in the past as "no session". Used by both
+     * main.js (policy decisions) and the IPC `get-initial-data` response so the renderer
+     * never has to do the math.
+     */
+    normalizeDeepWork(raw) {
+        if (!raw || typeof raw !== 'object') return null;
+        if (!raw.endTime) return null;
+        const end = new Date(raw.endTime).getTime();
+        if (!Number.isFinite(end)) return null;
+        const remainingMs = end - Date.now();
+        if (remainingMs <= 0) return null;
+        return { isActive: true, endTime: raw.endTime, remainingMs };
+    }
+
+    // ---------------- Calendar rollover ----------------
+    /**
+     * Re-apply "new day" policy if the local calendar day has advanced since the last
+     * baseline. Triggers:
+     *  - manual-lock cleanup (always)
+     *  - re-block of any sites that the user temporarily unblocked yesterday (when
+     *    `autoReblockUnblockedSitesOnNewDay` is true)
+     * Returns a summary object so main.js can decide whether to re-apply hosts.
+     */
+    advanceCalendarRollIfNeeded() {
+        const today = this.getLocalISODate();
+        const baseline = this.store.get('calendarRollBaselineDay', today);
+        if (baseline === today) {
+            return { rolled: false, prefsChanged: false, domainsChanged: false };
+        }
+
+        this.cleanupExpiredManualLocks();
+
+        const autoReblock = !!this.store.get('autoReblockUnblockedSitesOnNewDay', true);
+        let prefsChanged = false;
+        let domainsChanged = false;
+
+        if (autoReblock) {
+            const siteSettings = this.getSiteSettings();
+            const newPrefs = {};
+            for (const name of Object.keys(siteSettings)) {
+                newPrefs[name] = true;
+            }
+            const oldPrefs = this.store.get('appliedBlockedBySite', {}) || {};
+            const prefsKeysEqual =
+                Object.keys(oldPrefs).length === Object.keys(newPrefs).length &&
+                Object.keys(newPrefs).every(k => oldPrefs[k] === newPrefs[k]);
+            if (!prefsKeysEqual) {
+                this.store.set('appliedBlockedBySite', newPrefs);
+                prefsChanged = true;
+            }
+
+            const newDomains = this.buildBlockedDomainsFromSitePreferenceMap(newPrefs, siteSettings);
+            const oldDomains = this.getBlockedDomains();
+            const setsEqual =
+                newDomains.length === oldDomains.length &&
+                newDomains.every(d => oldDomains.includes(d));
+            if (!setsEqual) {
+                this.setBlockedDomains(newDomains);
+                domainsChanged = true;
+            }
+        }
+
+        this.store.set('calendarRollBaselineDay', today);
+        return { rolled: true, prefsChanged, domainsChanged };
+    }
+
+    // ---------------- Hosts tamper log ----------------
+    /**
+     * Appends a tamper event to the rolling log. Cap at 100 events so the store
+     * never balloons. Stored chronologically, oldest-first.
+     */
+    appendHostsTamperEvent(entry) {
+        const events = this.store.get('hostsTamperEvents', []) || [];
+        const stamped = { at: new Date().toISOString(), ...(entry || {}) };
+        events.push(stamped);
+        // Trim from the front so the most recent events are kept.
+        const MAX_EVENTS = 100;
+        const trimmed = events.length > MAX_EVENTS ? events.slice(events.length - MAX_EVENTS) : events;
+        this.store.set('hostsTamperEvents', trimmed);
+        return stamped;
+    }
+
+    // ---------------- Applied-block site-preference helpers ----------------
+    /**
+     * Pure: from a list of blocked domains, infer which sites are "fully blocked"
+     * (i.e. all of that site's domains are present). Used to derive `appliedBlockedBySite`
+     * after external/legacy state, or for sanity checks.
+     */
+    inferAppliedBlockedBySite(domains) {
+        const settings = this.getSiteSettings();
+        const lower = new Set((domains || []).map(d => String(d).toLowerCase()));
+        const out = {};
+        for (const [name, site] of Object.entries(settings)) {
+            if (!site.domains || site.domains.length === 0) {
+                out[name] = false;
+                continue;
+            }
+            out[name] = site.domains.every(d => lower.has(String(d).toLowerCase()));
+        }
+        return out;
+    }
+
+    /**
+     * Pure: rebuild the canonical blocked-domains list from a site-preference map
+     * (siteName -> boolean) and a fresh siteSettings snapshot.
+     */
+    buildBlockedDomainsFromSitePreferenceMap(prefMap, siteSettings) {
+        const out = new Set();
+        for (const [name, applied] of Object.entries(prefMap || {})) {
+            if (!applied) continue;
+            const site = siteSettings && siteSettings[name];
+            if (site && Array.isArray(site.domains)) {
+                site.domains.forEach(d => out.add(String(d).toLowerCase()));
+            }
+        }
+        return Array.from(out);
+    }
+
+    /**
+     * Write-through: persist the preference map inferred from the given domain list.
+     * Used at startup to backfill `appliedBlockedBySite` when it's missing.
+     */
+    syncAppliedBlockedFromDomains(domains) {
+        const inferred = this.inferAppliedBlockedBySite(domains);
+        this.store.set('appliedBlockedBySite', inferred);
+        return inferred;
     }
 }
 

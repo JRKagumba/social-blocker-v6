@@ -17,9 +17,35 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // --- Usage, Limits, and Friction ---
   setSiteLimit: (payload) => ipcRenderer.invoke('set-site-limit', payload),
   getCommitmentParagraph: () => ipcRenderer.invoke('get-commitment-paragraph'),
+  getProgressiveFrictionConfig: () => ipcRenderer.invoke('get-progressive-friction-config'),
+  setProgressiveFrictionConfig: (partial) => ipcRenderer.invoke('set-progressive-friction-config', partial),
+  getInsights: () => ipcRenderer.invoke('get-insights'),
   
   // --- Deep Work Mode ---
   startDeepWork: (durationInSeconds) => ipcRenderer.invoke('start-deep-work', durationInSeconds),
+  endDeepWork: () => ipcRenderer.invoke('end-deep-work'),
+  getDeepWorkConfig: () => ipcRenderer.invoke('get-deep-work-config'),
+  setDeepWorkConfig: (partial) => ipcRenderer.invoke('set-deep-work-config', partial),
+
+  // --- Deep Work Auto-Schedule ---
+  scheduleGet:    () => ipcRenderer.invoke('schedule-get'),
+  scheduleAdd:    (rule) => ipcRenderer.invoke('schedule-add', rule),
+  scheduleUpdate: (id, changes) => ipcRenderer.invoke('schedule-update', { id, changes }),
+  scheduleDelete: (id) => ipcRenderer.invoke('schedule-delete', { id }),
+  scheduleClearAll: () => ipcRenderer.invoke('schedule-clear-all'),
+
+  // --- Phone usage data (v1.7.0) ---
+  phoneGetStatus: () => ipcRenderer.invoke('phone-get-status'),
+  phonePickFolder: () => ipcRenderer.invoke('phone-pick-folder'),
+  phoneImportFolder: (folderPath) => ipcRenderer.invoke('phone-import-folder', folderPath),
+  phoneClearAll: () => ipcRenderer.invoke('phone-clear-all'),
+  getPhoneInsights: () => ipcRenderer.invoke('get-phone-insights'),
+
+  // --- Phone export reminder (v1.8.0) ---
+  phoneReminderGet: () => ipcRenderer.invoke('phone-reminder-get'),
+  phoneReminderSet: (partial) => ipcRenderer.invoke('phone-reminder-set', partial),
+  phoneReminderTestFire: () => ipcRenderer.invoke('phone-reminder-test-fire'),
+  onFocusPhoneSettings: (cb) => ipcRenderer.on('focus-phone-settings', cb),
   
   // --- History and Logging ---
   getHistory: () => ipcRenderer.invoke('get-history'),
@@ -41,8 +67,41 @@ contextBridge.exposeInMainWorld('electronAPI', {
   resumeUsageTracker: () => ipcRenderer.invoke('resume-usage-tracker'),
   clearUsageData: () => ipcRenderer.invoke('clear-usage-data'),
 
+  // --- Digest / Local-HTML Reports ---
+  getReportSettings: () => ipcRenderer.invoke('get-report-settings'),
+  setReportSettings: (partial) => ipcRenderer.invoke('set-report-settings', partial),
+  generateDigestNow: (period) => ipcRenderer.invoke('generate-digest-now', period),
+  openReportFolder: () => ipcRenderer.invoke('open-report-folder'),
+
+  // --- Auto-Update ---
+  updaterCheckNow: () => ipcRenderer.invoke('updater-check-now'),
+  updaterInstallNow: () => ipcRenderer.invoke('updater-install-now'),
+  updaterGetStatus: () => ipcRenderer.invoke('updater-get-status'),
+
+  // --- Startup / login item ---
+  startupGet: () => ipcRenderer.invoke('startup-get'),
+  startupSet: (openAtLogin) => ipcRenderer.invoke('startup-set', { openAtLogin }),
+
+  // --- HUD widget ---
+  hudShow: () => ipcRenderer.invoke('hud-show'),
+  hudHide: () => ipcRenderer.invoke('hud-hide'),
+  hudToggle: () => ipcRenderer.invoke('hud-toggle'),
+  hudGetConfig: () => ipcRenderer.invoke('hud-get-config'),
+  hudSetConfig: (partial) => ipcRenderer.invoke('hud-set-config', partial),
+
   // --- Real-time Listeners (Main -> Renderer) ---
   onUsageUpdate: (callback) => ipcRenderer.on('usage-updated', (_event, value) => callback(value)),
   onDeepWorkUpdate: (callback) => ipcRenderer.on('deep-work-update', (_event, value) => callback(value)),
+  repairHostsNow: () => ipcRenderer.invoke('repair-hosts-now'),
+  onHostsIntegrityUpdate: (callback) =>
+    ipcRenderer.on('hosts-integrity-update', (_event, payload) => callback(payload)),
+  onCalendarDayChanged: (callback) =>
+    ipcRenderer.on('calendar-day-changed', (_event, payload) => callback(payload)),
+  onUpdateReady: (callback) =>
+    ipcRenderer.on('update-ready', (_event, payload) => callback(payload)),
+  onUpdaterEvent: (callback) =>
+    ipcRenderer.on('updater-event', (_event, payload) => callback(payload)),
+  onScheduleEvent: (callback) =>
+    ipcRenderer.on('schedule-event', (_event, payload) => callback(payload)),
 });
 
